@@ -35,7 +35,7 @@ function formatOctokitError(err: unknown): string {
  * 2. If YES → create branch + commit + PR directly
  * 3. If NO  → fork the repo → create branch on fork → PR from fork to upstream
  *
- * All operations use the developer's own GitHub token.
+ * All operations use base64 blob creation for 100% robust tree construction.
  */
 export async function createSaayaPullRequest({
   githubToken,
@@ -127,36 +127,83 @@ export async function createSaayaPullRequest({
     headPrefix = `${username}:`;
   }
 
-  // 3. Get latest commit SHA on the working repo
+  // 3. Get latest commit SHA & root tree SHA from upstream target repo
   let latestCommitSha = "";
+  let baseTreeSha = "";
   try {
     const { data: refData } = await octokit.git.getRef({
-      owner: workOwner,
-      repo: workRepo,
+      owner,
+      repo,
       ref: `heads/${defaultBranch}`,
     });
     latestCommitSha = refData.object.sha;
+
+    const { data: commitObj } = await octokit.git.getCommit({
+      owner,
+      repo,
+      commit_sha: latestCommitSha,
+    });
+    baseTreeSha = commitObj.tree.sha;
   } catch (err) {
     throw new Error(
-      `Failed to get default branch '${defaultBranch}' ref on ${workOwner}/${workRepo}: ${formatOctokitError(err)}`
+      `Failed to get base commit/tree for branch '${defaultBranch}' on ${owner}/${repo}: ${formatOctokitError(err)}`
     );
   }
 
-  // 4. Create Tree with all generated files (retrying if fork object store sync is pending)
-  const treeItems = saayaFiles.map((file) => ({
-    path: `.saaya/repowiki/${file.path.replace(/^\/+/, "")}`,
-    mode: "100644" as const,
-    type: "blob" as const,
-    content: file.content,
-  }));
+  // 4. Deduplicate and clean file paths
+  const uniqueFilesMap = new Map<string, string>();
+  for (const file of saayaFiles) {
+    if (!file || !file.path) continue;
+    const cleanPath = `.saaya/repowiki/${file.path}`
+      .replace(/\/+/g, "/")
+      .replace(/^\//, "");
+    const contentStr =
+      typeof file.content === "string"
+        ? file.content
+        : JSON.stringify(file.content || "");
+    uniqueFilesMap.set(cleanPath, contentStr);
+  }
 
+  // 5. Create Git Blobs with Base64 encoding (prevents GitHub API 500 parsing errors)
+  onLog?.(`Creating Git blobs for ${uniqueFilesMap.size} generated files...`);
+  let treeItems: Array<{
+    path: string;
+    mode: "100644";
+    type: "blob";
+    sha: string;
+  }> = [];
+
+  try {
+    treeItems = await Promise.all(
+      Array.from(uniqueFilesMap.entries()).map(async ([cleanPath, contentStr]) => {
+        const base64Content = Buffer.from(contentStr, "utf-8").toString("base64");
+        const { data: blobData } = await octokit.git.createBlob({
+          owner: workOwner,
+          repo: workRepo,
+          content: base64Content,
+          encoding: "base64",
+        });
+
+        return {
+          path: cleanPath,
+          mode: "100644" as const,
+          type: "blob" as const,
+          sha: blobData.sha,
+        };
+      })
+    );
+  } catch (err) {
+    throw new Error(`Failed to create Git blobs: ${formatOctokitError(err)}`);
+  }
+
+  // 6. Create Git Tree linking the blob SHAs with base_tree
   let treeSha = "";
   for (let attempt = 1; attempt <= 3; attempt++) {
     try {
       const { data: treeData } = await octokit.git.createTree({
         owner: workOwner,
         repo: workRepo,
-        base_tree: latestCommitSha,
+        base_tree: baseTreeSha,
         tree: treeItems,
       });
       treeSha = treeData.sha;
@@ -170,7 +217,7 @@ export async function createSaayaPullRequest({
     }
   }
 
-  // 5. Create Commit
+  // 7. Create Commit
   let commitSha = "";
   try {
     const { data: commitData } = await octokit.git.createCommit({
@@ -186,7 +233,7 @@ export async function createSaayaPullRequest({
     throw new Error(`Failed to create Git commit: ${formatOctokitError(err)}`);
   }
 
-  // 6. Create Branch Ref pointing directly to the new commit
+  // 8. Create Branch Ref pointing directly to the new commit
   const branchName = `docs/saaya-repowiki-${Date.now()}`;
   try {
     await octokit.git.createRef({
@@ -195,12 +242,12 @@ export async function createSaayaPullRequest({
       ref: `refs/heads/${branchName}`,
       sha: commitSha,
     });
-    onLog?.(`Branch created: ${branchName} with ${saayaFiles.length} files`);
+    onLog?.(`Branch created: ${branchName} with ${treeItems.length} files`);
   } catch (err) {
     throw new Error(`Failed to create Git branch ref: ${formatOctokitError(err)}`);
   }
 
-  // 7. Create Pull Request (with retries for cross-fork branch propagation)
+  // 9. Create Pull Request (with retries for cross-fork branch propagation)
   let prUrl = "";
   for (let attempt = 1; attempt <= 3; attempt++) {
     try {
@@ -232,7 +279,7 @@ This PR introduces a comprehensive, pre-indexed knowledge base and architectural
 \`\`\`
 
 ### Stats:
-- **${saayaFiles.length} files** generated
+- **${treeItems.length} files** generated
 - Generated by **@${username}** via Saaya
 
 ---

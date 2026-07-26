@@ -42,6 +42,8 @@ export default function NewSaayaPage() {
   const [customModel, setCustomModel] = useState("");
   const [customRpm, setCustomRpm] = useState(60);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [hasSavedConfig, setHasSavedConfig] = useState(false);
+  const [configLoaded, setConfigLoaded] = useState(false);
 
   // Live model state
   const [freeModels, setFreeModels] = useState<LiveModel[]>([]);
@@ -53,6 +55,37 @@ export default function NewSaayaPage() {
 
   const currentStepIndex = steps.findIndex((s) => s.id === currentStep);
 
+  // Load saved settings on mount — auto-fill provider config
+  useEffect(() => {
+    async function loadSettings() {
+      try {
+        const res = await fetch("/api/settings");
+        if (res.ok) {
+          const data = await res.json();
+          if (data.openrouter?.api_key) {
+            setProviderType("OPENROUTER");
+            if (data.openrouter.selected_model) {
+              setSelectedModel(data.openrouter.selected_model);
+            }
+            setHasSavedConfig(true);
+          } else if (data.custom?.base_url || data.custom?.api_key) {
+            setProviderType("CUSTOM_OPENAI");
+            setCustomBaseUrl(data.custom.base_url || "");
+            setCustomApiKey(data.custom.api_key || "");
+            setCustomModel(data.custom.selected_model || "");
+            setCustomRpm(data.custom.max_rpm || 60);
+            setHasSavedConfig(true);
+          }
+        }
+      } catch {
+        // ignore
+      } finally {
+        setConfigLoaded(true);
+      }
+    }
+    loadSettings();
+  }, []);
+
   // Fetch live models from OpenRouter
   useEffect(() => {
     async function fetchModels() {
@@ -63,7 +96,7 @@ export default function NewSaayaPage() {
           const data = await res.json();
           setFreeModels(data.free || []);
           setPaidModels(data.paid || []);
-          // Auto-select first free model
+          // Auto-select first free model only if no saved model
           if (data.free?.length > 0 && !selectedModel) {
             setSelectedModel(data.free[0].id);
           }
@@ -174,17 +207,60 @@ export default function NewSaayaPage() {
                 className="w-full rounded-xl border border-ink-700 bg-ink-850 px-4 py-3.5 text-ink-50 placeholder-ink-500 outline-none transition-all focus:border-fuji-500 focus:ring-1 focus:ring-fuji-500/30"
               />
               <p className="mt-3 text-xs text-ink-500">
-                Supports public repositories. For private repos, ensure your
-                GitHub token has repo access.
+                Works on any public repo. PRs are created via fork if you don&apos;t have write access.
               </p>
             </div>
-            <button
-              onClick={() => setCurrentStep("engine")}
-              disabled={!repoUrl.trim()}
-              className="w-full rounded-xl bg-gradient-to-r from-fuji-600 to-fuji-500 py-3.5 font-medium text-white transition-all hover:brightness-110 disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              Continue
-            </button>
+
+            {/* Saved config indicator */}
+            {configLoaded && hasSavedConfig && (
+              <div className="flex items-center gap-3 rounded-xl border border-matcha-500/20 bg-matcha-500/5 px-5 py-3.5">
+                <Check className="h-4 w-4 text-matcha-400" />
+                <span className="text-sm text-ink-300">
+                  Using saved config:{" "}
+                  <span className="text-matcha-400">
+                    {providerType === "OPENROUTER" ? `OpenRouter • ${selectedModel || "auto"}` : `Custom • ${customModel}`}
+                  </span>
+                </span>
+                <button
+                  onClick={() => setCurrentStep("engine")}
+                  className="ml-auto text-xs text-fuji-400 hover:text-fuji-300"
+                >
+                  Change
+                </button>
+              </div>
+            )}
+
+            <div className="flex gap-3">
+              {hasSavedConfig ? (
+                <>
+                  <button
+                    onClick={handleSubmit}
+                    disabled={!repoUrl.trim() || isSubmitting}
+                    className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-fuji-600 via-sakura-500 to-fuji-500 py-3.5 font-medium text-white shadow-glow transition-all hover:brightness-110 disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    {isSubmitting ? (
+                      <>
+                        <Loader2 className="h-5 w-5 animate-spin" />
+                        Starting...
+                      </>
+                    ) : (
+                      <>
+                        <Rocket className="h-5 w-5" />
+                        Generate Saaya
+                      </>
+                    )}
+                  </button>
+                </>
+              ) : (
+                <button
+                  onClick={() => setCurrentStep("engine")}
+                  disabled={!repoUrl.trim()}
+                  className="w-full rounded-xl bg-gradient-to-r from-fuji-600 to-fuji-500 py-3.5 font-medium text-white transition-all hover:brightness-110 disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  Continue
+                </button>
+              )}
+            </div>
           </motion.div>
         )}
 
