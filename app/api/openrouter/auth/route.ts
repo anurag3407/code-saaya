@@ -12,7 +12,21 @@ import { createAdminClient, DATABASE_ID, COLLECTIONS, Query } from "@/lib/appwri
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const code = searchParams.get("code");
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+
+  // Determine actual app URL dynamically (prevents fallback to localhost on production)
+  const host = request.headers.get("x-forwarded-host") || request.headers.get("host");
+  const proto = request.headers.get("x-forwarded-proto") || "https";
+  let appUrl = process.env.NEXT_PUBLIC_APP_URL;
+  if (!appUrl) {
+    if (host && !host.includes("localhost")) {
+      appUrl = `${proto}://${host}`;
+    } else if (process.env.VERCEL_URL) {
+      appUrl = `https://${process.env.VERCEL_URL}`;
+    } else {
+      appUrl = request.nextUrl.origin || "http://localhost:3000";
+    }
+  }
+  appUrl = appUrl.replace(/\/$/, "");
 
   if (!code) {
     return NextResponse.redirect(`${appUrl}/settings?error=no_code`);
@@ -24,28 +38,30 @@ export async function GET(request: NextRequest) {
       return NextResponse.redirect(`${appUrl}/sign-in`);
     }
 
-    // Exchange the OAuth code for an API key via OpenRouter
-    const tokenRes = await fetch("https://openrouter.ai/api/v1/auth/callback", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ code }),
-    });
+    let apiKey: string | null = null;
 
-    let apiKey: string;
-
-    if (tokenRes.ok) {
-      const tokenData = await tokenRes.json();
-      apiKey = tokenData.key || tokenData.api_key || code;
+    // Fallback: If code itself is already an API key
+    if (code.startsWith("sk-or-")) {
+      apiKey = code;
     } else {
-      // Fallback: OpenRouter sometimes returns the key directly in the redirect
-      // If the code itself looks like an API key (starts with sk-or-), use it directly
-      if (code.startsWith("sk-or-")) {
-        apiKey = code;
+      // Exchange the OAuth code for an API key via OpenRouter
+      const tokenRes = await fetch("https://openrouter.ai/api/v1/auth/callback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code }),
+      });
+
+      if (tokenRes.ok) {
+        const tokenData = await tokenRes.json();
+        apiKey = tokenData.key || tokenData.api_key || null;
       } else {
-        return NextResponse.redirect(
-          `${appUrl}/settings?error=token_exchange_failed`
-        );
+        const errText = await tokenRes.text().catch(() => "");
+        console.error("[/api/openrouter/auth] OpenRouter token exchange failed:", tokenRes.status, errText);
       }
+    }
+
+    if (!apiKey) {
+      return NextResponse.redirect(`${appUrl}/settings?error=token_exchange_failed`);
     }
 
     // Store the API key in Appwrite
