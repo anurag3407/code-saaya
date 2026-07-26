@@ -2,6 +2,34 @@ import { Octokit } from "@octokit/rest";
 import type { GeneratedFile } from "@/types/saaya";
 
 /**
+ * Format Octokit errors into descriptive human-readable strings
+ */
+function formatOctokitError(err: unknown): string {
+  if (err && typeof err === "object" && "status" in err) {
+    const octokitErr = err as {
+      status?: number;
+      message?: string;
+      response?: {
+        data?: {
+          message?: string;
+          errors?: Array<{ message?: string; code?: string; field?: string }>;
+        };
+      };
+    };
+    const status = octokitErr.status || "Unknown";
+    const apiMsg =
+      octokitErr.response?.data?.message || octokitErr.message || "Unknown error";
+    const details = octokitErr.response?.data?.errors
+      ? octokitErr.response.data.errors
+          .map((e) => e.message || e.code || JSON.stringify(e))
+          .join(", ")
+      : "";
+    return `GitHub API Error (${status}): ${apiMsg}${details ? ` — ${details}` : ""}`;
+  }
+  return err instanceof Error ? err.message : String(err);
+}
+
+/**
  * Cross-repo PR automation:
  * 1. Check if the user has push access to the target repo
  * 2. If YES → create branch + commit + PR directly
@@ -31,18 +59,26 @@ export async function createSaayaPullRequest({
 
   const octokit = new Octokit({ auth: token, userAgent: "code-saaya/v1.0.0" });
 
-  // Get authenticated user's username
-  const { data: user } = await octokit.users.getAuthenticated();
-  const username = user.login;
-  onLog?.(`Authenticated as @${username}`);
+  let username = "";
+  try {
+    const { data: user } = await octokit.users.getAuthenticated();
+    username = user.login;
+    onLog?.(`Authenticated as @${username}`);
+  } catch (err) {
+    throw new Error(`Failed to authenticate with GitHub: ${formatOctokitError(err)}`);
+  }
 
   // 1. Get target repo info
-  const { data: repoData } = await octokit.repos.get({ owner, repo });
-  const defaultBranch = repoData.default_branch;
-
-  // 2. Check if user has push access
-  const hasPushAccess =
-    repoData.permissions?.push || repoData.permissions?.admin || false;
+  let defaultBranch = "main";
+  let hasPushAccess = false;
+  try {
+    const { data: repoData } = await octokit.repos.get({ owner, repo });
+    defaultBranch = repoData.default_branch;
+    hasPushAccess =
+      repoData.permissions?.push || repoData.permissions?.admin || false;
+  } catch (err) {
+    throw new Error(`Failed to get target repository info: ${formatOctokitError(err)}`);
+  }
 
   let workOwner: string; // Where we create the branch
   let workRepo: string;
@@ -64,7 +100,6 @@ export async function createSaayaPullRequest({
         owner: username,
         repo,
       });
-      // Verify it's actually a fork of the target
       if (existingFork.fork && existingFork.parent?.full_name === `${owner}/${repo}`) {
         forkData = existingFork;
         onLog?.(`Using existing fork: ${username}/${repo}`);
@@ -74,15 +109,17 @@ export async function createSaayaPullRequest({
     }
 
     if (!forkData) {
-      const { data: newFork } = await octokit.repos.createFork({
-        owner,
-        repo,
-      });
-      forkData = newFork;
-      onLog?.(`Fork created: ${username}/${repo}`);
-
-      // Wait for fork to be ready (GitHub forks are async)
-      await waitForFork(octokit, username, repo);
+      try {
+        const { data: newFork } = await octokit.repos.createFork({
+          owner,
+          repo,
+        });
+        forkData = newFork;
+        onLog?.(`Fork created: ${username}/${repo}`);
+        await waitForFork(octokit, username, repo);
+      } catch (err) {
+        throw new Error(`Failed to create repository fork: ${formatOctokitError(err)}`);
+      }
     }
 
     workOwner = username;
@@ -91,65 +128,89 @@ export async function createSaayaPullRequest({
   }
 
   // 3. Get latest commit SHA on the working repo
-  const { data: refData } = await octokit.git.getRef({
-    owner: workOwner,
-    repo: workRepo,
-    ref: `heads/${defaultBranch}`,
-  });
-  const latestCommitSha = refData.object.sha;
+  let latestCommitSha = "";
+  try {
+    const { data: refData } = await octokit.git.getRef({
+      owner: workOwner,
+      repo: workRepo,
+      ref: `heads/${defaultBranch}`,
+    });
+    latestCommitSha = refData.object.sha;
+  } catch (err) {
+    throw new Error(
+      `Failed to get default branch '${defaultBranch}' ref on ${workOwner}/${workRepo}: ${formatOctokitError(err)}`
+    );
+  }
 
-  // 4. Create branch
-  const branchName = `docs/saaya-repowiki-${Date.now()}`;
-  await octokit.git.createRef({
-    owner: workOwner,
-    repo: workRepo,
-    ref: `refs/heads/${branchName}`,
-    sha: latestCommitSha,
-  });
-  onLog?.(`Branch created: ${branchName}`);
-
-  // 5. Create tree with all generated files
+  // 4. Create Tree with all generated files (retrying if fork object store sync is pending)
   const treeItems = saayaFiles.map((file) => ({
-    path: `.saaya/repowiki/${file.path}`,
+    path: `.saaya/repowiki/${file.path.replace(/^\/+/, "")}`,
     mode: "100644" as const,
     type: "blob" as const,
     content: file.content,
   }));
 
-  const { data: treeData } = await octokit.git.createTree({
-    owner: workOwner,
-    repo: workRepo,
-    base_tree: latestCommitSha,
-    tree: treeItems,
-  });
+  let treeSha = "";
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const { data: treeData } = await octokit.git.createTree({
+        owner: workOwner,
+        repo: workRepo,
+        base_tree: latestCommitSha,
+        tree: treeItems,
+      });
+      treeSha = treeData.sha;
+      break;
+    } catch (err) {
+      if (attempt === 3) {
+        throw new Error(`Failed to create Git tree: ${formatOctokitError(err)}`);
+      }
+      onLog?.(`Waiting for repository tree object store to sync (attempt ${attempt}/3)...`);
+      await new Promise((res) => setTimeout(res, 3000));
+    }
+  }
 
-  // 6. Create commit
-  const { data: commitData } = await octokit.git.createCommit({
-    owner: workOwner,
-    repo: workRepo,
-    message:
-      "docs(saaya): generate comprehensive RepoWiki knowledge base [skip ci]",
-    tree: treeData.sha,
-    parents: [latestCommitSha],
-  });
+  // 5. Create Commit
+  let commitSha = "";
+  try {
+    const { data: commitData } = await octokit.git.createCommit({
+      owner: workOwner,
+      repo: workRepo,
+      message:
+        "docs(saaya): generate comprehensive RepoWiki knowledge base [skip ci]",
+      tree: treeSha,
+      parents: [latestCommitSha],
+    });
+    commitSha = commitData.sha;
+  } catch (err) {
+    throw new Error(`Failed to create Git commit: ${formatOctokitError(err)}`);
+  }
 
-  // 7. Update branch ref to new commit
-  await octokit.git.updateRef({
-    owner: workOwner,
-    repo: workRepo,
-    ref: `heads/${branchName}`,
-    sha: commitData.sha,
-  });
-  onLog?.(`Committed ${saayaFiles.length} files`);
+  // 6. Create Branch Ref pointing directly to the new commit
+  const branchName = `docs/saaya-repowiki-${Date.now()}`;
+  try {
+    await octokit.git.createRef({
+      owner: workOwner,
+      repo: workRepo,
+      ref: `refs/heads/${branchName}`,
+      sha: commitSha,
+    });
+    onLog?.(`Branch created: ${branchName} with ${saayaFiles.length} files`);
+  } catch (err) {
+    throw new Error(`Failed to create Git branch ref: ${formatOctokitError(err)}`);
+  }
 
-  // 8. Create Pull Request (always targets the ORIGINAL repo)
-  const { data: prData } = await octokit.pulls.create({
-    owner, // PR target = original repo
-    repo,
-    title: "🛡️ Add Auto-Generated Saaya RepoWiki Knowledge Base",
-    head: `${headPrefix}${branchName}`,
-    base: defaultBranch,
-    body: `## 🛡️ Saaya RepoWiki Documentation
+  // 7. Create Pull Request (with retries for cross-fork branch propagation)
+  let prUrl = "";
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const { data: prData } = await octokit.pulls.create({
+        owner, // target original repo
+        repo,
+        title: "🛡️ Add Auto-Generated Saaya RepoWiki Knowledge Base",
+        head: `${headPrefix}${branchName}`,
+        base: defaultBranch,
+        body: `## 🛡️ Saaya RepoWiki Documentation
 
 This PR introduces a comprehensive, pre-indexed knowledge base and architectural documentation suite generated under \`.saaya/repowiki/\`.
 
@@ -176,10 +237,20 @@ This PR introduces a comprehensive, pre-indexed knowledge base and architectural
 
 ---
 *Generated by [Saaya](https://code-saaya.vercel.app) — AI Repository Knowledge Generator*`,
-  });
+      });
+      prUrl = prData.html_url;
+      break;
+    } catch (err) {
+      if (attempt === 3) {
+        throw new Error(`Failed to create Pull Request: ${formatOctokitError(err)}`);
+      }
+      onLog?.(`Waiting for pull request branch to propagate on GitHub (attempt ${attempt}/3)...`);
+      await new Promise((res) => setTimeout(res, 3000));
+    }
+  }
 
-  onLog?.(`✅ PR created: ${prData.html_url}`);
-  return prData.html_url;
+  onLog?.(`✅ PR created: ${prUrl}`);
+  return prUrl;
 }
 
 /**

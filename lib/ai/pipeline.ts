@@ -310,11 +310,12 @@ Return the complete Markdown article.`;
           return response.choices[0]?.message?.content || "";
         });
 
+        const safeName = catalog.name.replace(/[/\\:*?"<>|]/g, "_").trim();
         const pct = 70 + Math.round((i / articles.length) * 20);
         onProgress?.(`Article ${i + 1}/${articles.length}: ${catalog.name}`, pct);
 
         return {
-          path: `en/content/${catalog.name}.md`,
+          path: `en/content/${safeName}.md`,
           content: result,
         } as GeneratedFile;
       })
