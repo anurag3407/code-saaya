@@ -49,10 +49,7 @@ export async function GET() {
     });
   } catch (error) {
     console.error("[/api/settings] GET Error:", error);
-    return NextResponse.json(
-      { error: "Failed to load settings" },
-      { status: 500 }
-    );
+    return NextResponse.json({ openrouter: null, custom: null }, { status: 200 });
   }
 }
 
