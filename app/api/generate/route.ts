@@ -43,8 +43,16 @@ export async function POST(request: NextRequest) {
 
     // Parse repo URL
     const { owner, repo } = parseGitHubUrl(repoUrl);
-    const githubToken = process.env.GITHUB_TOKEN!;
     const jobId = uuidv4();
+
+    // Use the platform GitHub token from env (handles fork + PR on any repo)
+    const githubToken = process.env.GITHUB_TOKEN?.trim() || "";
+    if (!githubToken) {
+      return NextResponse.json(
+        { error: "GITHUB_TOKEN is not configured. Add it to your environment variables." },
+        { status: 400 }
+      );
+    }
 
     // Create initial job record
     const initialJob = {
@@ -186,6 +194,7 @@ export async function POST(request: NextRequest) {
           owner,
           repo,
           saayaFiles: allFiles,
+          onLog: (msg) => pushJobLog(jobId, "info", msg),
         });
 
         pushJobLog(jobId, "success", `✅ Done! PR created: ${prUrl}`);
