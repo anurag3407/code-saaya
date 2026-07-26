@@ -6,6 +6,8 @@ import { RateLimitedTaskQueue } from "@/lib/ai/rate-limiter";
 import { scanRepository, parseGitHubUrl } from "@/lib/ai/scanner";
 import { buildPipelineGraph } from "@/lib/ai/pipeline";
 import { createSaayaPullRequest } from "@/lib/github/pr-automation";
+import { createAdminClient, DATABASE_ID, COLLECTIONS } from "@/lib/appwrite/server";
+import { setInMemoryJob, updateInMemoryJob } from "@/lib/ai/job-store";
 import type { ProviderType, GeneratedFile } from "@/types/saaya";
 
 export async function POST(request: NextRequest) {
@@ -44,6 +46,32 @@ export async function POST(request: NextRequest) {
     const githubToken = process.env.GITHUB_TOKEN!;
     const jobId = uuidv4();
 
+    // Create initial job record
+    const initialJob = {
+      $id: jobId,
+      user_id: userId,
+      repo_url: repoUrl,
+      repo_name: `${owner}/${repo}`,
+      status: "SCANNING" as const,
+      progress_percentage: 10,
+      current_step: "SCANNING",
+      created_at: new Date().toISOString(),
+    };
+
+    setInMemoryJob(initialJob);
+
+    try {
+      const { databases } = createAdminClient();
+      await databases.createDocument(
+        DATABASE_ID,
+        COLLECTIONS.SAAYA_JOBS,
+        jobId,
+        initialJob
+      );
+    } catch {
+      // Ignore if Appwrite unconfigured
+    }
+
     // Resolve API key
     const resolvedApiKey =
       providerType === "OPENROUTER"
@@ -75,6 +103,8 @@ export async function POST(request: NextRequest) {
           repo
         );
 
+        updateInMemoryJob(jobId, { status: "PLANNING", progress_percentage: 30, current_step: "PLANNING" });
+
         // Step 2: Run LangGraph pipeline
         console.log(`[Job ${jobId}] Starting LangGraph pipeline...`);
         const pipeline = buildPipelineGraph();
@@ -96,10 +126,15 @@ export async function POST(request: NextRequest) {
           metadata: {},
           pullRequestUrl: undefined,
           error: undefined,
-          progress: 10,
-          currentStep: "Scanning repository",
+          progress: 30,
+          currentStep: "PLANNING",
           onProgress: (step: string, progress: number) => {
             console.log(`[Job ${jobId}] ${progress}% — ${step}`);
+            updateInMemoryJob(jobId, {
+              status: progress > 70 ? "WRITING_ARTICLES" : "GENERATING_CARDS",
+              progress_percentage: progress,
+              current_step: step,
+            });
           },
         });
 
@@ -108,6 +143,8 @@ export async function POST(request: NextRequest) {
           ...result.generatedCards,
           ...result.generatedArticles,
         ];
+
+        updateInMemoryJob(jobId, { status: "CREATING_PR", progress_percentage: 90, current_step: "CREATING_PR" });
 
         // Step 4: Create Pull Request
         console.log(`[Job ${jobId}] Creating PR with ${allFiles.length} files...`);
@@ -119,15 +156,42 @@ export async function POST(request: NextRequest) {
         });
 
         console.log(`[Job ${jobId}] ✅ Complete! PR: ${prUrl}`);
+
+        updateInMemoryJob(jobId, {
+          status: "COMPLETED",
+          progress_percentage: 100,
+          current_step: "COMPLETED",
+          pull_request_url: prUrl,
+        });
+
+        try {
+          const { databases } = createAdminClient();
+          await databases.updateDocument(
+            DATABASE_ID,
+            COLLECTIONS.SAAYA_JOBS,
+            jobId,
+            {
+              status: "COMPLETED",
+              progress_percentage: 100,
+              current_step: "COMPLETED",
+              pull_request_url: prUrl,
+            }
+          );
+        } catch {
+          // ignore
+        }
+
         return { success: true, prUrl };
       } catch (err) {
         console.error(`[Job ${jobId}] ❌ Failed:`, err);
+        updateInMemoryJob(jobId, {
+          status: "FAILED",
+          error_message: String(err),
+        });
         return { success: false, error: String(err) };
       }
     })();
 
-    // Don't await — return immediately with jobId
-    // In production, this would be tracked via Appwrite realtime
     pipelinePromise.catch(console.error);
 
     return NextResponse.json({

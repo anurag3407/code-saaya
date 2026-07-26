@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { createAdminClient, DATABASE_ID, COLLECTIONS } from "@/lib/appwrite/server";
+import { getInMemoryJob } from "@/lib/ai/job-store";
 
 export async function GET(
   _request: NextRequest,
@@ -13,6 +14,17 @@ export async function GET(
     }
 
     const { jobId } = await params;
+
+    // Check in-memory job store first
+    const memoryJob = getInMemoryJob(jobId);
+    if (memoryJob) {
+      if (memoryJob.user_id === userId) {
+        return NextResponse.json(memoryJob);
+      }
+      return NextResponse.json({ error: "Not found" }, { status: 404 });
+    }
+
+    // Fallback to Appwrite
     const { databases } = createAdminClient();
 
     const job = await databases.getDocument(
