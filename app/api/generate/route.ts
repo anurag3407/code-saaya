@@ -6,7 +6,7 @@ import { RateLimitedTaskQueue } from "@/lib/ai/rate-limiter";
 import { scanRepository, parseGitHubUrl } from "@/lib/ai/scanner";
 import { buildPipelineGraph } from "@/lib/ai/pipeline";
 import { createSaayaPullRequest } from "@/lib/github/pr-automation";
-import { createAdminClient, DATABASE_ID, COLLECTIONS } from "@/lib/appwrite/server";
+import { createAdminClient, DATABASE_ID, COLLECTIONS, Query } from "@/lib/appwrite/server";
 import { setInMemoryJob, updateInMemoryJob } from "@/lib/ai/job-store";
 import type { ProviderType, GeneratedFile } from "@/types/saaya";
 
@@ -72,11 +72,41 @@ export async function POST(request: NextRequest) {
       // Ignore if Appwrite unconfigured
     }
 
-    // Resolve API key
-    const resolvedApiKey =
-      providerType === "OPENROUTER"
-        ? apiKey || process.env.OPENROUTER_API_KEY || "sk-or-placeholder"
-        : apiKey || "not-needed";
+    // Resolve API key (try request body -> Appwrite stored settings -> env var)
+    let resolvedApiKey = apiKey?.trim();
+
+    if (!resolvedApiKey && providerType === "OPENROUTER") {
+      try {
+        const { databases } = createAdminClient();
+        const providers = await databases.listDocuments(
+          DATABASE_ID,
+          COLLECTIONS.AI_PROVIDERS,
+          [
+            Query.equal("user_id", userId),
+            Query.equal("provider_type", "OPENROUTER"),
+          ]
+        );
+        if (providers.documents.length > 0 && providers.documents[0].api_key) {
+          resolvedApiKey = providers.documents[0].api_key.trim();
+        }
+      } catch {
+        // Ignore if Appwrite missing
+      }
+    }
+
+    if (!resolvedApiKey) {
+      resolvedApiKey = process.env.OPENROUTER_API_KEY?.trim();
+    }
+
+    if (!resolvedApiKey || resolvedApiKey === "sk-or-placeholder") {
+      return NextResponse.json(
+        {
+          error:
+            "OpenRouter API Key is missing. Please connect OpenRouter OAuth or enter your API key in Settings.",
+        },
+        { status: 400 }
+      );
+    }
 
     // Create AI client & rate limiter
     const aiClient = createAIClient({
