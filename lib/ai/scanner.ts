@@ -18,11 +18,12 @@ const CONFIG_FILES = [
  * Scans a GitHub repository and returns its file tree + key config files
  */
 export async function scanRepository(
-  githubToken: string,
+  githubToken: string | undefined,
   owner: string,
   repo: string
 ): Promise<{ fileTree: RepoFileInfo[]; configFiles: Record<string, string> }> {
-  const octokit = new Octokit({ auth: githubToken });
+  const token = githubToken?.trim();
+  const octokit = token ? new Octokit({ auth: token }) : new Octokit();
 
   // 1. Get the full recursive tree
   const { data: repoData } = await octokit.repos.get({ owner, repo });

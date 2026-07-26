@@ -10,12 +10,19 @@ export async function createSaayaPullRequest({
   repo,
   saayaFiles,
 }: {
-  githubToken: string;
+  githubToken: string | undefined;
   owner: string;
   repo: string;
   saayaFiles: GeneratedFile[];
 }): Promise<string> {
-  const octokit = new Octokit({ auth: githubToken });
+  const token = githubToken?.trim();
+  if (!token) {
+    throw new Error(
+      "GitHub Personal Access Token (GITHUB_TOKEN) is not configured in Vercel environment variables. Unable to create Pull Request."
+    );
+  }
+
+  const octokit = new Octokit({ auth: token });
 
   // 1. Get default branch & latest commit SHA
   const { data: repoData } = await octokit.repos.get({ owner, repo });
