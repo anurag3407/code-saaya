@@ -22,11 +22,29 @@ export async function scanRepository(
   owner: string,
   repo: string
 ): Promise<{ fileTree: RepoFileInfo[]; configFiles: Record<string, string> }> {
-  const token = githubToken?.trim();
-  const octokit = token ? new Octokit({ auth: token }) : new Octokit();
+  // Sanitize token (remove quotes, whitespace)
+  const cleanToken = githubToken?.trim().replace(/^["']|["']$/g, "");
+  
+  let octokit = cleanToken
+    ? new Octokit({ auth: cleanToken, userAgent: "code-saaya/v1.0.0" })
+    : new Octokit({ userAgent: "code-saaya/v1.0.0" });
 
-  // 1. Get the full recursive tree
-  const { data: repoData } = await octokit.repos.get({ owner, repo });
+  let repoData;
+  try {
+    const { data } = await octokit.repos.get({ owner, repo });
+    repoData = data;
+  } catch (err: any) {
+    // If authenticated call fails with 401, try unauthenticated fallback for public repo
+    if (err?.status === 401 && cleanToken) {
+      console.warn(`[scanRepository] Authenticated request returned 401. Retrying unauthenticated...`);
+      octokit = new Octokit({ userAgent: "code-saaya/v1.0.0" });
+      const { data } = await octokit.repos.get({ owner, repo });
+      repoData = data;
+    } else {
+      throw err;
+    }
+  }
+
   const defaultBranch = repoData.default_branch;
 
   const { data: treeData } = await octokit.git.getTree({
