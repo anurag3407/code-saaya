@@ -97,6 +97,6 @@ export function createQueueForTier(isFreeTier: boolean, customRpm?: number, cust
     return new RateLimitedTaskQueue(customConcurrency, customRpm);
   }
   return isFreeTier
-    ? new RateLimitedTaskQueue(2, 15)   // Free: 2 concurrent, 15 RPM
+    ? new RateLimitedTaskQueue(3, 20)   // Free: 3 concurrent, 20 RPM
     : new RateLimitedTaskQueue(10, 200); // Paid: 10 concurrent, 200 RPM
 }

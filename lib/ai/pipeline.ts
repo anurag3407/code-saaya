@@ -187,19 +187,25 @@ async function generateModuleCards(state: PipelineStateType): Promise<Partial<Pi
   const generatedCards: GeneratedFile[] = [];
   const modules = taxonomy.slice(0, 30); // Limit to avoid excessive API calls
 
-  for (let i = 0; i < modules.length; i++) {
-    const mod = modules[i];
-    const dirPrefix = mod.dir_name.replace(/[/\\:*?"<>|]/g, "_");
-    const moduleDir = mod.module_path
-      ? `knowledge/en/${modules[0]?.dir_name || state.repo}/${dirPrefix}`
-      : `knowledge/en/${dirPrefix}`;
+  // Process in parallel batches — the queue handles actual concurrency
+  const batchSize = Math.max(queue.active <= 0 ? 4 : 2, 2);
+  for (let batchStart = 0; batchStart < modules.length; batchStart += batchSize) {
+    const batch = modules.slice(batchStart, batchStart + batchSize);
 
-    const scopeFiles = fileTree
-      .filter((f) => mod.scope.some((s) => f.path.startsWith(s.replace(/\/$/, ""))))
-      .slice(0, 50)
-      .map((f) => f.path);
+    const batchResults = await Promise.all(
+      batch.map(async (mod, batchIdx) => {
+        const i = batchStart + batchIdx;
+        const dirPrefix = mod.dir_name.replace(/[/\\:*?"<>|]/g, "_");
+        const moduleDir = mod.module_path
+          ? `knowledge/en/${modules[0]?.dir_name || state.repo}/${dirPrefix}`
+          : `knowledge/en/${dirPrefix}`;
 
-    const cardPrompt = `Generate documentation for the module "${mod.title}" (path: ${mod.module_path || "root"}).
+        const scopeFiles = fileTree
+          .filter((f) => mod.scope.some((s) => f.path.startsWith(s.replace(/\/$/, ""))))
+          .slice(0, 50)
+          .map((f) => f.path);
+
+        const cardPrompt = `Generate documentation for the module "${mod.title}" (path: ${mod.module_path || "root"}).
 Scope files: ${scopeFiles.slice(0, 20).join(", ")}
 
 Generate ALL 6 files as a JSON object with keys: overview, architecture_design, tech_stack, coding_conventions, unique_setup_and_commands, module_yaml.
@@ -213,33 +219,38 @@ Generate ALL 6 files as a JSON object with keys: overview, architecture_design, 
 
 Return ONLY valid JSON.`;
 
-    const result = await queue.enqueue(async () => {
-      const response = await aiClient.chat.completions.create({
-        model,
-        messages: [{ role: "user", content: cardPrompt }],
-        temperature: 0.2,
-        max_tokens: 3000,
-      });
-      return response.choices[0]?.message?.content || "{}";
-    });
+        const result = await queue.enqueue(async () => {
+          const response = await aiClient.chat.completions.create({
+            model,
+            messages: [{ role: "user", content: cardPrompt }],
+            temperature: 0.2,
+            max_tokens: 3000,
+          });
+          return response.choices[0]?.message?.content || "{}";
+        });
 
-    try {
-      const cleaned = result.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
-      const cards = JSON.parse(cleaned);
-      generatedCards.push(
-        { path: `${moduleDir}/overview.md`, content: cards.overview || "" },
-        { path: `${moduleDir}/architecture_design.md`, content: cards.architecture_design || "" },
-        { path: `${moduleDir}/tech_stack.md`, content: cards.tech_stack || "" },
-        { path: `${moduleDir}/coding_conventions.md`, content: cards.coding_conventions || "" },
-        { path: `${moduleDir}/unique_setup_and_commands.md`, content: cards.unique_setup_and_commands || "" },
-        { path: `${moduleDir}/_module.yaml`, content: cards.module_yaml || "" }
-      );
-    } catch {
-      // Skip malformed card
+        try {
+          const cleaned = result.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
+          const cards = JSON.parse(cleaned);
+          const pct = 40 + Math.round((i / modules.length) * 25);
+          onProgress?.(`Card ${i + 1}/${modules.length}: ${mod.title}`, pct);
+          return [
+            { path: `${moduleDir}/overview.md`, content: cards.overview || "" },
+            { path: `${moduleDir}/architecture_design.md`, content: cards.architecture_design || "" },
+            { path: `${moduleDir}/tech_stack.md`, content: cards.tech_stack || "" },
+            { path: `${moduleDir}/coding_conventions.md`, content: cards.coding_conventions || "" },
+            { path: `${moduleDir}/unique_setup_and_commands.md`, content: cards.unique_setup_and_commands || "" },
+            { path: `${moduleDir}/_module.yaml`, content: cards.module_yaml || "" },
+          ] as GeneratedFile[];
+        } catch {
+          return [] as GeneratedFile[];
+        }
+      })
+    );
+
+    for (const files of batchResults) {
+      generatedCards.push(...files);
     }
-
-    const pct = 40 + Math.round((i / modules.length) * 25);
-    onProgress?.(`Card ${i + 1}/${modules.length}: ${mod.title}`, pct);
   }
 
   return { generatedCards, progress: 65, currentStep: "Module cards generated" };
@@ -254,10 +265,16 @@ async function writeArticles(state: PipelineStateType): Promise<Partial<Pipeline
   const generatedArticles: GeneratedFile[] = [];
   const articles = catalogs.slice(0, 20); // Limit
 
-  for (let i = 0; i < articles.length; i++) {
-    const catalog = articles[i];
+  // Process articles in parallel batches
+  const batchSize = Math.max(queue.active <= 0 ? 4 : 2, 2);
+  for (let batchStart = 0; batchStart < articles.length; batchStart += batchSize) {
+    const batch = articles.slice(batchStart, batchStart + batchSize);
 
-    const articlePrompt = `Write a comprehensive documentation article titled "${catalog.name}".
+    const batchResults = await Promise.all(
+      batch.map(async (catalog, batchIdx) => {
+        const i = batchStart + batchIdx;
+
+        const articlePrompt = `Write a comprehensive documentation article titled "${catalog.name}".
 
 Instructions: ${catalog.prompt}
 
@@ -283,24 +300,27 @@ ${Object.entries(configFiles)
 
 Return the complete Markdown article.`;
 
-    const result = await queue.enqueue(async () => {
-      const response = await aiClient.chat.completions.create({
-        model,
-        messages: [{ role: "user", content: articlePrompt }],
-        temperature: 0.3,
-        max_tokens: 4096,
-      });
-      return response.choices[0]?.message?.content || "";
-    });
+        const result = await queue.enqueue(async () => {
+          const response = await aiClient.chat.completions.create({
+            model,
+            messages: [{ role: "user", content: articlePrompt }],
+            temperature: 0.3,
+            max_tokens: 4096,
+          });
+          return response.choices[0]?.message?.content || "";
+        });
 
-    const fileName = `${catalog.name}.md`;
-    generatedArticles.push({
-      path: `en/content/${fileName}`,
-      content: result,
-    });
+        const pct = 70 + Math.round((i / articles.length) * 20);
+        onProgress?.(`Article ${i + 1}/${articles.length}: ${catalog.name}`, pct);
 
-    const pct = 70 + Math.round((i / articles.length) * 20);
-    onProgress?.(`Article ${i + 1}/${articles.length}: ${catalog.name}`, pct);
+        return {
+          path: `en/content/${catalog.name}.md`,
+          content: result,
+        } as GeneratedFile;
+      })
+    );
+
+    generatedArticles.push(...batchResults);
   }
 
   return { generatedArticles, progress: 90, currentStep: "Articles written" };

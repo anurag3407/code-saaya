@@ -12,6 +12,7 @@ import {
   PenTool,
   ExternalLink,
   XCircle,
+  Terminal,
 } from "lucide-react";
 
 import type { JobStatus } from "@/types/saaya";
@@ -24,6 +25,12 @@ const pipelineSteps = [
   { id: "CREATING_PR", label: "Creating Pull Request", icon: GitBranch, description: "Committing .saaya/repowiki/ via Octokit" },
 ];
 
+interface LogEntry {
+  ts: number;
+  level: "info" | "success" | "warn" | "error";
+  message: string;
+}
+
 interface JobData {
   status: JobStatus;
   progress_percentage: number;
@@ -31,6 +38,7 @@ interface JobData {
   pull_request_url?: string;
   repo_name?: string;
   error_message?: string;
+  logs?: LogEntry[];
 }
 
 export default function JobDetailPage() {
@@ -42,6 +50,7 @@ export default function JobDetailPage() {
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const logEndRef = useRef<HTMLDivElement | null>(null);
 
   const stopPolling = useCallback(() => {
     if (intervalRef.current) {
@@ -73,12 +82,17 @@ export default function JobDetailPage() {
 
   useEffect(() => {
     fetchJob();
-    // Poll every 3s while job is active
+    // Poll every 2s for responsive live logs
     intervalRef.current = setInterval(() => {
       fetchJob();
-    }, 3000);
+    }, 2000);
     return () => stopPolling();
   }, [fetchJob, stopPolling]);
+
+  // Auto-scroll logs to bottom
+  useEffect(() => {
+    logEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [job?.logs?.length]);
 
   const currentStatus = job?.status || ("PENDING" as JobStatus);
   const progress = job?.progress_percentage || 0;
@@ -214,6 +228,46 @@ export default function JobDetailPage() {
         <div className="flex items-center gap-3 rounded-2xl border border-red-500/30 bg-red-500/10 p-6 text-red-400">
           <XCircle className="h-5 w-5 shrink-0" />
           <span className="text-sm">{job?.error_message || "Generation failed. Please try again."}</span>
+        </div>
+      )}
+
+      {/* Live Logs Terminal */}
+      {job?.logs && job.logs.length > 0 && (
+        <div className="rounded-2xl border border-ink-800 bg-ink-950 overflow-hidden">
+          <div className="flex items-center gap-2 border-b border-ink-800 px-5 py-3">
+            <Terminal className="h-4 w-4 text-fuji-400" />
+            <span className="text-xs font-medium text-ink-300">Live Output</span>
+            <span className="ml-auto flex items-center gap-1.5">
+              {!isCompleted && !isFailed && (
+                <span className="h-2 w-2 animate-pulse rounded-full bg-matcha-400" />
+              )}
+              <span className="text-xs text-ink-500">{job.logs.length} lines</span>
+            </span>
+          </div>
+          <div className="max-h-[320px] overflow-y-auto p-4 font-mono text-xs leading-relaxed">
+            {job.logs.map((log, i) => (
+              <div key={i} className="flex gap-2 py-0.5">
+                <span className="shrink-0 text-ink-600">
+                  {new Date(log.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+                </span>
+                <span
+                  className={
+                    log.level === "success"
+                      ? "text-matcha-400"
+                      : log.level === "error"
+                        ? "text-red-400"
+                        : log.level === "warn"
+                          ? "text-yellow-400"
+                          : "text-ink-300"
+                  }
+                >
+                  {log.level === "success" ? "✓ " : log.level === "error" ? "✗ " : "  "}
+                  {log.message}
+                </span>
+              </div>
+            ))}
+            <div ref={logEndRef} />
+          </div>
         </div>
       )}
         </>

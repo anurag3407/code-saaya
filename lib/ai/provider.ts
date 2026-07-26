@@ -48,6 +48,6 @@ export function getRateLimits(modelId: string, customRpm?: number, customConcurr
     return { maxRpm: customRpm, maxConcurrency: customConcurrency };
   }
   return isFreeModel(modelId)
-    ? { maxRpm: 15, maxConcurrency: 2 }
+    ? { maxRpm: 20, maxConcurrency: 3 }
     : { maxRpm: 200, maxConcurrency: 10 };
 }

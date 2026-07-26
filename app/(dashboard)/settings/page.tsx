@@ -28,6 +28,13 @@ function SettingsContent() {
   const [customRpm, setCustomRpm] = useState(60);
   const [customTpm, setCustomTpm] = useState(100000);
   const [customConcurrency, setCustomConcurrency] = useState(4);
+  const [oauthUrl, setOauthUrl] = useState("");
+
+  // Build OAuth URL client-side to avoid SSR empty origin
+  useEffect(() => {
+    const callbackUrl = `${window.location.origin}/api/openrouter/auth`;
+    setOauthUrl(`https://openrouter.ai/auth?callback_url=${encodeURIComponent(callbackUrl)}`);
+  }, []);
 
   // Load existing provider config on mount
   useEffect(() => {
@@ -148,11 +155,8 @@ function SettingsContent() {
             </div>
           </div>
           <a
-            href={`https://openrouter.ai/auth?callback_url=${encodeURIComponent(
-              typeof window !== "undefined"
-                ? `${window.location.origin}/api/openrouter/auth`
-                : ""
-            )}`}
+            href={oauthUrl || "#"}
+            onClick={(e) => { if (!oauthUrl) e.preventDefault(); }}
             className="inline-flex items-center gap-2 rounded-lg border border-matcha-500/30 bg-matcha-500/10 px-4 py-2.5 text-sm text-matcha-400 transition-all hover:bg-matcha-500/20"
           >
             <Globe className="h-4 w-4" />

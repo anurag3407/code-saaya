@@ -7,7 +7,7 @@ import { scanRepository, parseGitHubUrl } from "@/lib/ai/scanner";
 import { buildPipelineGraph } from "@/lib/ai/pipeline";
 import { createSaayaPullRequest } from "@/lib/github/pr-automation";
 import { createAdminClient, DATABASE_ID, COLLECTIONS, Query } from "@/lib/appwrite/server";
-import { setInMemoryJob, updateInMemoryJob } from "@/lib/ai/job-store";
+import { setInMemoryJob, updateInMemoryJob, pushJobLog } from "@/lib/ai/job-store";
 import type { ProviderType, GeneratedFile } from "@/types/saaya";
 
 export async function POST(request: NextRequest) {
@@ -126,17 +126,19 @@ export async function POST(request: NextRequest) {
     const pipelinePromise = (async () => {
       try {
         // Step 1: Scan repository
-        console.log(`[Job ${jobId}] Scanning ${owner}/${repo}...`);
+        pushJobLog(jobId, "info", `Scanning repository ${owner}/${repo}...`);
         const { fileTree, configFiles } = await scanRepository(
           githubToken,
           owner,
           repo
         );
+        pushJobLog(jobId, "success", `Found ${fileTree.length} files, ${Object.keys(configFiles).length} config files`);
 
-        updateInMemoryJob(jobId, { status: "PLANNING", progress_percentage: 30, current_step: "PLANNING" });
+        updateInMemoryJob(jobId, { status: "PLANNING", progress_percentage: 15, current_step: "PLANNING" });
 
         // Step 2: Run LangGraph pipeline
-        console.log(`[Job ${jobId}] Starting LangGraph pipeline...`);
+        pushJobLog(jobId, "info", `Starting AI pipeline with model: ${model}`);
+        pushJobLog(jobId, "info", `Rate limits: ${limits.maxConcurrency} concurrent, ${limits.maxRpm} RPM`);
         const pipeline = buildPipelineGraph();
 
         const result = await pipeline.invoke({
@@ -156,12 +158,12 @@ export async function POST(request: NextRequest) {
           metadata: {},
           pullRequestUrl: undefined,
           error: undefined,
-          progress: 30,
+          progress: 15,
           currentStep: "PLANNING",
           onProgress: (step: string, progress: number) => {
-            console.log(`[Job ${jobId}] ${progress}% — ${step}`);
+            pushJobLog(jobId, "info", `[${progress}%] ${step}`);
             updateInMemoryJob(jobId, {
-              status: progress > 70 ? "WRITING_ARTICLES" : "GENERATING_CARDS",
+              status: progress >= 90 ? "CREATING_PR" : progress > 65 ? "WRITING_ARTICLES" : progress > 35 ? "GENERATING_CARDS" : "PLANNING",
               progress_percentage: progress,
               current_step: step,
             });
@@ -173,11 +175,12 @@ export async function POST(request: NextRequest) {
           ...result.generatedCards,
           ...result.generatedArticles,
         ];
+        pushJobLog(jobId, "success", `Generated ${allFiles.length} documentation files`);
 
-        updateInMemoryJob(jobId, { status: "CREATING_PR", progress_percentage: 90, current_step: "CREATING_PR" });
+        updateInMemoryJob(jobId, { status: "CREATING_PR", progress_percentage: 92, current_step: "CREATING_PR" });
 
         // Step 4: Create Pull Request
-        console.log(`[Job ${jobId}] Creating PR with ${allFiles.length} files...`);
+        pushJobLog(jobId, "info", `Creating pull request with ${allFiles.length} files...`);
         const prUrl = await createSaayaPullRequest({
           githubToken,
           owner,
@@ -185,7 +188,7 @@ export async function POST(request: NextRequest) {
           saayaFiles: allFiles,
         });
 
-        console.log(`[Job ${jobId}] ✅ Complete! PR: ${prUrl}`);
+        pushJobLog(jobId, "success", `✅ Done! PR created: ${prUrl}`);
 
         updateInMemoryJob(jobId, {
           status: "COMPLETED",
@@ -214,6 +217,7 @@ export async function POST(request: NextRequest) {
         return { success: true, prUrl };
       } catch (err) {
         console.error(`[Job ${jobId}] ❌ Failed:`, err);
+        pushJobLog(jobId, "error", `Pipeline failed: ${err instanceof Error ? err.message : String(err)}`);
         updateInMemoryJob(jobId, {
           status: "FAILED",
           error_message: String(err),
