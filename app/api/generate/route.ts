@@ -19,20 +19,41 @@ export async function POST(request: NextRequest) {
 
     const body = await request.json();
     const {
-      repoUrl,
+      repoUrl: inputRepoUrl,
+      resumeJobId,
       providerType = "OPENROUTER",
       model,
       baseUrl,
       apiKey,
       maxRpm,
     } = body as {
-      repoUrl: string;
+      repoUrl?: string;
+      resumeJobId?: string;
       providerType: ProviderType;
       model: string;
       baseUrl?: string;
       apiKey?: string;
       maxRpm?: number;
     };
+
+    let repoUrl = inputRepoUrl || "";
+    let jobId = resumeJobId || uuidv4();
+    let existingCheckpoint: any = {};
+
+    if (resumeJobId) {
+      const existingJob = getInMemoryJob(resumeJobId);
+      if (existingJob) {
+        repoUrl = existingJob.repo_url;
+        existingCheckpoint = existingJob.checkpoint || {};
+        updateInMemoryJob(resumeJobId, {
+          status: "PLANNING",
+          progress_percentage: 15,
+          current_step: "RESUMING",
+          error_message: undefined,
+        });
+        pushJobLog(resumeJobId, "info", `▶️ Resuming job ${resumeJobId} from checkpoint...`);
+      }
+    }
 
     const targetModel = model?.trim() || "meta-llama/llama-3.3-70b-instruct:free";
 
@@ -45,7 +66,6 @@ export async function POST(request: NextRequest) {
 
     // Parse repo URL
     const { owner, repo } = parseGitHubUrl(repoUrl);
-    const jobId = uuidv4();
 
     // Use the platform GitHub token from env (handles fork + PR on any repo)
     const githubToken = process.env.GITHUB_TOKEN?.trim() || "";
@@ -56,30 +76,33 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Create initial job record
-    const initialJob = {
-      $id: jobId,
-      user_id: userId,
-      repo_url: repoUrl,
-      repo_name: `${owner}/${repo}`,
-      status: "SCANNING" as const,
-      progress_percentage: 10,
-      current_step: "SCANNING",
-      created_at: new Date().toISOString(),
-    };
+    if (!resumeJobId) {
+      // Create initial job record
+      const initialJob = {
+        $id: jobId,
+        user_id: userId,
+        repo_url: repoUrl,
+        repo_name: `${owner}/${repo}`,
+        status: "SCANNING" as const,
+        progress_percentage: 10,
+        current_step: "SCANNING",
+        tokens_used: 0,
+        created_at: new Date().toISOString(),
+      };
 
-    setInMemoryJob(initialJob);
+      setInMemoryJob(initialJob);
 
-    try {
-      const { databases } = createAdminClient();
-      await databases.createDocument(
-        DATABASE_ID,
-        COLLECTIONS.SAAYA_JOBS,
-        jobId,
-        initialJob
-      );
-    } catch {
-      // Ignore if Appwrite unconfigured
+      try {
+        const { databases } = createAdminClient();
+        await databases.createDocument(
+          DATABASE_ID,
+          COLLECTIONS.SAAYA_JOBS,
+          jobId,
+          initialJob
+        );
+      } catch {
+        // Ignore if Appwrite unconfigured
+      }
     }
 
     // Resolve API key (try request body -> Appwrite stored settings -> env var)
@@ -135,14 +158,19 @@ export async function POST(request: NextRequest) {
     // Start pipeline asynchronously (don't block the response)
     const pipelinePromise = (async () => {
       try {
-        // Step 1: Scan repository
-        pushJobLog(jobId, "info", `Scanning repository ${owner}/${repo}...`);
-        const { fileTree, configFiles } = await scanRepository(
-          githubToken,
-          owner,
-          repo
-        );
-        pushJobLog(jobId, "success", `Found ${fileTree.length} files, ${Object.keys(configFiles).length} config files`);
+        // Step 1: Scan repository (or reuse cached scan if resuming)
+        let fileTree = existingCheckpoint.fileTree || [];
+        let configFiles = existingCheckpoint.configFiles || {};
+
+        if (!fileTree.length) {
+          pushJobLog(jobId, "info", `Scanning repository ${owner}/${repo}...`);
+          const scanRes = await scanRepository(githubToken, owner, repo);
+          fileTree = scanRes.fileTree;
+          configFiles = scanRes.configFiles;
+          pushJobLog(jobId, "success", `Found ${fileTree.length} files, ${Object.keys(configFiles).length} config files`);
+        } else {
+          pushJobLog(jobId, "info", `Reusing scanned file tree (${fileTree.length} files) from checkpoint`);
+        }
 
         updateInMemoryJob(jobId, { status: "PLANNING", progress_percentage: 15, current_step: "PLANNING" });
 
@@ -161,10 +189,10 @@ export async function POST(request: NextRequest) {
           queue,
           fileTree,
           configFiles,
-          taxonomy: [],
-          catalogs: [],
-          generatedCards: [],
-          generatedArticles: [],
+          taxonomy: existingCheckpoint.taxonomy || [],
+          catalogs: existingCheckpoint.catalogs || [],
+          generatedCards: existingCheckpoint.generatedCards || [],
+          generatedArticles: existingCheckpoint.generatedArticles || [],
           metadata: {},
           pullRequestUrl: undefined,
           error: undefined,
@@ -177,6 +205,18 @@ export async function POST(request: NextRequest) {
               progress_percentage: progress,
               current_step: step,
             });
+          },
+        });
+
+        // Save progress checkpoint
+        updateInMemoryJob(jobId, {
+          checkpoint: {
+            fileTree,
+            configFiles,
+            taxonomy: result.taxonomy,
+            catalogs: result.catalogs,
+            generatedCards: result.generatedCards,
+            generatedArticles: result.generatedArticles,
           },
         });
 

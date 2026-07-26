@@ -39,6 +39,12 @@ type PipelineStateType = typeof PipelineState.State;
 
 async function planTaxonomy(state: PipelineStateType): Promise<Partial<PipelineStateType>> {
   const { aiClient, model, fileTree, configFiles, queue, onProgress } = state;
+  
+  if (state.taxonomy && state.taxonomy.length > 0) {
+    onProgress?.(`Reusing ${state.taxonomy.length} modules from checkpoint`, 25);
+    return { taxonomy: state.taxonomy, progress: 25, currentStep: "Taxonomy planned" };
+  }
+
   onProgress?.("Planning taxonomy from repository structure...", 15);
 
   const treeSummary = fileTree
@@ -116,6 +122,12 @@ Rules:
 
 async function generateCatalogs(state: PipelineStateType): Promise<Partial<PipelineStateType>> {
   const { aiClient, model, taxonomy, configFiles, queue, onProgress } = state;
+
+  if (state.catalogs && state.catalogs.length > 0) {
+    onProgress?.(`Reusing ${state.catalogs.length} planned articles from checkpoint`, 35);
+    return { catalogs: state.catalogs, progress: 35, currentStep: "Catalog generated" };
+  }
+
   onProgress?.("Generating documentation catalog...", 30);
 
   const moduleSummary = taxonomy
@@ -182,6 +194,12 @@ Rules:
 
 async function generateModuleCards(state: PipelineStateType): Promise<Partial<PipelineStateType>> {
   const { aiClient, model, taxonomy, fileTree, queue, onProgress } = state;
+
+  if (state.generatedCards && state.generatedCards.length > 0) {
+    onProgress?.(`Reusing ${state.generatedCards.length} module cards from checkpoint`, 65);
+    return { generatedCards: state.generatedCards, progress: 65, currentStep: "Module cards generated" };
+  }
+
   onProgress?.("Generating 6-file module knowledge cards...", 40);
 
   const generatedCards: GeneratedFile[] = [];
@@ -260,6 +278,12 @@ Return ONLY valid JSON.`;
 
 async function writeArticles(state: PipelineStateType): Promise<Partial<PipelineStateType>> {
   const { aiClient, model, catalogs, configFiles, queue, onProgress } = state;
+
+  if (state.generatedArticles && state.generatedArticles.length > 0) {
+    onProgress?.(`Reusing ${state.generatedArticles.length} written articles from checkpoint`, 90);
+    return { generatedArticles: state.generatedArticles, progress: 90, currentStep: "Articles written" };
+  }
+
   onProgress?.("Writing documentation articles...", 70);
 
   const generatedArticles: GeneratedFile[] = [];

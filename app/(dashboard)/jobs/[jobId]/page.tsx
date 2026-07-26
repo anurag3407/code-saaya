@@ -15,6 +15,7 @@ import {
   Terminal,
   RotateCcw,
   Plus,
+  Play,
 } from "lucide-react";
 
 import type { JobStatus } from "@/types/saaya";
@@ -246,12 +247,35 @@ export default function JobDetailPage() {
             <XCircle className="h-5 w-5 shrink-0" />
             <span className="text-sm">{job?.error_message || "Generation failed. Please try again."}</span>
           </div>
-          <div className="flex gap-3">
+          <div className="flex flex-col gap-3 sm:flex-row">
+            <button
+              onClick={async () => {
+                setLoading(true);
+                try {
+                  const res = await fetch("/api/generate", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ resumeJobId: jobId }),
+                  });
+                  const data = await res.json();
+                  if (data.jobId) {
+                    window.location.reload();
+                  }
+                } catch {
+                  /* ignore */
+                } finally {
+                  setLoading(false);
+                }
+              }}
+              className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-fuji-600 via-sakura-500 to-fuji-500 py-3 font-medium text-white shadow-glow transition-all hover:brightness-110"
+            >
+              <Play className="h-4 w-4" />
+              Continue Generation ({job?.current_step || "resume"})
+            </button>
             <button
               onClick={async () => {
                 setJob(null);
                 setLoading(true);
-                setNotFound(false);
                 try {
                   const res = await fetch("/api/generate", {
                     method: "POST",
@@ -262,20 +286,16 @@ export default function JobDetailPage() {
                   if (data.jobId) {
                     window.location.href = `/jobs/${data.jobId}`;
                   }
-                } catch { /* ignore */ } finally {
+                } catch {
+                  /* ignore */
+                } finally {
                   setLoading(false);
                 }
               }}
-              className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-fuji-600 to-fuji-500 py-3 font-medium text-white transition-all hover:brightness-110"
+              className="flex items-center justify-center gap-2 rounded-xl border border-ink-700 px-5 py-3 text-sm font-medium text-ink-300 transition-all hover:border-ink-500 hover:text-ink-100"
             >
               <RotateCcw className="h-4 w-4" />
-              Retry Generation
-            </button>
-            <button
-              onClick={() => router.push("/dashboard/new")}
-              className="rounded-xl border border-ink-700 px-6 py-3 text-sm text-ink-300 transition-all hover:border-ink-500"
-            >
-              New Repo
+              Restart from Scratch
             </button>
           </div>
         </div>

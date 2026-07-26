@@ -1,11 +1,20 @@
 import fs from "fs";
 import path from "path";
-import type { JobStatus } from "@/types/saaya";
+import type { JobStatus, ModuleNode, CatalogNode, GeneratedFile, RepoFileInfo } from "@/types/saaya";
 
 export interface LogEntry {
   ts: number;
   level: "info" | "success" | "warn" | "error";
   message: string;
+}
+
+export interface JobCheckpoint {
+  fileTree?: RepoFileInfo[];
+  configFiles?: Record<string, string>;
+  taxonomy?: ModuleNode[];
+  catalogs?: CatalogNode[];
+  generatedCards?: GeneratedFile[];
+  generatedArticles?: GeneratedFile[];
 }
 
 export interface JobRecord {
@@ -17,10 +26,12 @@ export interface JobRecord {
   status: JobStatus;
   progress_percentage: number;
   current_step: string;
+  tokens_used?: number;
   pull_request_url?: string;
   error_message?: string;
   created_at: string;
   logs?: LogEntry[];
+  checkpoint?: JobCheckpoint;
 }
 
 const STORAGE_FILE = path.join(process.cwd(), ".saaya-jobs-cache.json");
