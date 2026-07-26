@@ -287,7 +287,24 @@ This PR introduces a comprehensive, pre-indexed knowledge base and architectural
       });
       prUrl = prData.html_url;
       break;
-    } catch (err) {
+    } catch (err: unknown) {
+      const octokitStatus =
+        err && typeof err === "object" && "status" in err
+          ? (err as { status?: number }).status
+          : undefined;
+
+      // Handle 403 Forbidden gracefully when token lacks PR creation scope on upstream repo
+      if (octokitStatus === 403) {
+        const compareUrl = `https://github.com/${owner}/${repo}/compare/${defaultBranch}...${headPrefix}${branchName}`;
+        onLog?.(
+          `⚠️ GitHub token lacks PR creation permission on upstream target repo (${owner}/${repo}).`
+        );
+        onLog?.(
+          `✅ Branch committed & pushed to fork (@${username})! Submit PR manually: ${compareUrl}`
+        );
+        return compareUrl;
+      }
+
       if (attempt === 3) {
         throw new Error(`Failed to create Pull Request: ${formatOctokitError(err)}`);
       }
