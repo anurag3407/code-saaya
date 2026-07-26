@@ -45,7 +45,8 @@ export async function GET(request: NextRequest) {
       apiKey = code;
     } else {
       // Exchange the OAuth code for an API key via OpenRouter
-      const tokenRes = await fetch("https://openrouter.ai/api/v1/auth/callback", {
+      // Docs: https://openrouter.ai/docs/guides/overview/auth/oauth
+      const tokenRes = await fetch("https://openrouter.ai/api/v1/auth/keys", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ code }),
