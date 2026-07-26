@@ -62,14 +62,19 @@ export default function NewSaayaPage() {
         const res = await fetch("/api/settings");
         if (res.ok) {
           const data = await res.json();
-          if (data.openrouter?.api_key) {
+          if (data.openrouter) {
             setProviderType("OPENROUTER");
             if (data.openrouter.selected_model) {
               setSelectedModel(data.openrouter.selected_model);
             }
-            setHasSavedConfig(true);
-          } else if (data.custom?.base_url || data.custom?.api_key) {
-            setProviderType("CUSTOM_OPENAI");
+            if (data.openrouter.api_key || data.openrouter.selected_model) {
+              setHasSavedConfig(true);
+            }
+          }
+          if (data.custom?.base_url || data.custom?.api_key || data.custom?.selected_model) {
+            if (!data.openrouter?.api_key) {
+              setProviderType("CUSTOM_OPENAI");
+            }
             setCustomBaseUrl(data.custom.base_url || "");
             setCustomApiKey(data.custom.api_key || "");
             setCustomModel(data.custom.selected_model || "");
@@ -86,7 +91,7 @@ export default function NewSaayaPage() {
     loadSettings();
   }, []);
 
-  // Fetch live models from OpenRouter
+  // Fetch live models from OpenRouter (only once on mount)
   useEffect(() => {
     async function fetchModels() {
       setModelsLoading(true);
@@ -96,10 +101,8 @@ export default function NewSaayaPage() {
           const data = await res.json();
           setFreeModels(data.free || []);
           setPaidModels(data.paid || []);
-          // Auto-select first free model only if no saved model
-          if (data.free?.length > 0 && !selectedModel) {
-            setSelectedModel(data.free[0].id);
-          }
+          // Auto-select first free model if none selected
+          setSelectedModel((prev) => prev || data.free?.[0]?.id || "meta-llama/llama-3.3-70b-instruct:free");
         }
       } catch {
         // silently fail
@@ -108,7 +111,7 @@ export default function NewSaayaPage() {
       }
     }
     fetchModels();
-  }, [selectedModel]);
+  }, []);
 
   const filteredFree = freeModels.filter(
     (m) =>
@@ -125,6 +128,11 @@ export default function NewSaayaPage() {
 
   const handleSubmit = async () => {
     setIsSubmitting(true);
+    const chosenModel =
+      providerType === "OPENROUTER"
+        ? (selectedModel || freeModels[0]?.id || "meta-llama/llama-3.3-70b-instruct:free")
+        : customModel;
+
     try {
       const res = await fetch("/api/generate", {
         method: "POST",
@@ -132,18 +140,22 @@ export default function NewSaayaPage() {
         body: JSON.stringify({
           repoUrl,
           providerType,
-          model: providerType === "OPENROUTER" ? selectedModel : customModel,
+          model: chosenModel,
           baseUrl: providerType === "CUSTOM_OPENAI" ? customBaseUrl : undefined,
           apiKey: providerType === "CUSTOM_OPENAI" ? customApiKey : undefined,
           maxRpm: providerType === "CUSTOM_OPENAI" ? customRpm : undefined,
         }),
       });
       const data = await res.json();
+      if (!res.ok || data.error) {
+        alert(`Failed to start pipeline: ${data.error || res.statusText}`);
+        return;
+      }
       if (data.jobId) {
         window.location.href = `/jobs/${data.jobId}`;
       }
-    } catch {
-      // Handle error
+    } catch (err) {
+      alert(`Error starting pipeline: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setIsSubmitting(false);
     }

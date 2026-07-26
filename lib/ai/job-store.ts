@@ -1,3 +1,5 @@
+import fs from "fs";
+import path from "path";
 import type { JobStatus } from "@/types/saaya";
 
 export interface LogEntry {
@@ -21,32 +23,74 @@ export interface JobRecord {
   logs?: LogEntry[];
 }
 
-// Global in-memory map to store jobs across active server instances
-const jobsMap = new Map<string, JobRecord>();
+const STORAGE_FILE = path.join(process.cwd(), ".saaya-jobs-cache.json");
+
+const globalForJobs = globalThis as unknown as {
+  __saaya_jobs_map__?: Map<string, JobRecord>;
+};
+
+function loadJobsFromDisk(): Map<string, JobRecord> {
+  const map = new Map<string, JobRecord>();
+  try {
+    if (fs.existsSync(STORAGE_FILE)) {
+      const data = fs.readFileSync(STORAGE_FILE, "utf-8");
+      const list: JobRecord[] = JSON.parse(data);
+      for (const job of list) {
+        map.set(job.$id, job);
+      }
+    }
+  } catch {
+    // ignore
+  }
+  return map;
+}
+
+function saveJobsToDisk(map: Map<string, JobRecord>): void {
+  try {
+    const list = Array.from(map.values());
+    fs.writeFileSync(STORAGE_FILE, JSON.stringify(list, null, 2), "utf-8");
+  } catch {
+    // ignore
+  }
+}
+
+if (!globalForJobs.__saaya_jobs_map__) {
+  globalForJobs.__saaya_jobs_map__ = loadJobsFromDisk();
+}
+const jobsMap = globalForJobs.__saaya_jobs_map__!;
 
 const MAX_LOGS = 200; // Keep last 200 log entries per job
 
 export function setInMemoryJob(job: JobRecord): void {
-  jobsMap.set(job.$id, { ...job, logs: [] });
+  jobsMap.set(job.$id, { ...job, logs: job.logs || [] });
+  saveJobsToDisk(jobsMap);
 }
 
-export function updateInMemoryJob(jobId: string, updates: Partial<JobRecord>): JobRecord | undefined {
+export function updateInMemoryJob(
+  jobId: string,
+  updates: Partial<JobRecord>
+): JobRecord | undefined {
   const existing = jobsMap.get(jobId);
   if (!existing) return undefined;
   const updated = { ...existing, ...updates };
   jobsMap.set(jobId, updated);
+  saveJobsToDisk(jobsMap);
   return updated;
 }
 
-export function pushJobLog(jobId: string, level: LogEntry["level"], message: string): void {
+export function pushJobLog(
+  jobId: string,
+  level: LogEntry["level"],
+  message: string
+): void {
   const job = jobsMap.get(jobId);
   if (!job) return;
   if (!job.logs) job.logs = [];
   job.logs.push({ ts: Date.now(), level, message });
-  // Trim old logs
   if (job.logs.length > MAX_LOGS) {
     job.logs = job.logs.slice(-MAX_LOGS);
   }
+  saveJobsToDisk(jobsMap);
 }
 
 export function getInMemoryJob(jobId: string): JobRecord | undefined {
@@ -56,5 +100,8 @@ export function getInMemoryJob(jobId: string): JobRecord | undefined {
 export function listInMemoryUserJobs(userId: string): JobRecord[] {
   return Array.from(jobsMap.values())
     .filter((j) => j.user_id === userId)
-    .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    .sort(
+      (a, b) =>
+        new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+    );
 }

@@ -34,6 +34,8 @@ export async function POST(request: NextRequest) {
       maxRpm?: number;
     };
 
+    const targetModel = model?.trim() || "meta-llama/llama-3.3-70b-instruct:free";
+
     if (!repoUrl) {
       return NextResponse.json(
         { error: "Repository URL is required" },
@@ -121,10 +123,10 @@ export async function POST(request: NextRequest) {
       providerType,
       apiKey: resolvedApiKey,
       baseUrl,
-      model,
+      model: targetModel,
     });
 
-    const limits = getRateLimits(model, maxRpm);
+    const limits = getRateLimits(targetModel, maxRpm);
     const queue = new RateLimitedTaskQueue(
       limits.maxConcurrency,
       limits.maxRpm
@@ -145,7 +147,7 @@ export async function POST(request: NextRequest) {
         updateInMemoryJob(jobId, { status: "PLANNING", progress_percentage: 15, current_step: "PLANNING" });
 
         // Step 2: Run LangGraph pipeline
-        pushJobLog(jobId, "info", `Starting AI pipeline with model: ${model}`);
+        pushJobLog(jobId, "info", `Starting AI pipeline with model: ${targetModel}`);
         pushJobLog(jobId, "info", `Rate limits: ${limits.maxConcurrency} concurrent, ${limits.maxRpm} RPM`);
         const pipeline = buildPipelineGraph();
 
@@ -154,7 +156,7 @@ export async function POST(request: NextRequest) {
           owner,
           repo,
           githubToken,
-          model,
+          model: targetModel,
           aiClient,
           queue,
           fileTree,
