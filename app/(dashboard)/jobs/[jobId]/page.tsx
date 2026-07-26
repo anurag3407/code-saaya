@@ -1,7 +1,7 @@
 "use client";
 
-import { useParams } from "next/navigation";
-import { useState, useEffect, useCallback } from "react";
+import { useParams, useRouter } from "next/navigation";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { motion } from "framer-motion";
 import {
   Loader2,
@@ -35,10 +35,20 @@ interface JobData {
 
 export default function JobDetailPage() {
   const params = useParams();
+  const router = useRouter();
   const jobId = params.jobId as string;
 
   const [job, setJob] = useState<JobData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [notFound, setNotFound] = useState(false);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const stopPolling = useCallback(() => {
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
+  }, []);
 
   const fetchJob = useCallback(async () => {
     try {
@@ -46,22 +56,29 @@ export default function JobDetailPage() {
       if (res.ok) {
         const data = await res.json();
         setJob(data);
+        // Stop polling on terminal states
+        if (data.status === "COMPLETED" || data.status === "FAILED") {
+          stopPolling();
+        }
+      } else if (res.status === 404) {
+        setNotFound(true);
+        stopPolling();
       }
     } catch {
-      // silently fail
+      // network error — keep trying
     } finally {
       setLoading(false);
     }
-  }, [jobId]);
+  }, [jobId, stopPolling]);
 
   useEffect(() => {
     fetchJob();
     // Poll every 3s while job is active
-    const interval = setInterval(() => {
+    intervalRef.current = setInterval(() => {
       fetchJob();
     }, 3000);
-    return () => clearInterval(interval);
-  }, [fetchJob]);
+    return () => stopPolling();
+  }, [fetchJob, stopPolling]);
 
   const currentStatus = job?.status || ("PENDING" as JobStatus);
   const progress = job?.progress_percentage || 0;
@@ -81,6 +98,20 @@ export default function JobDetailPage() {
       {loading ? (
         <div className="flex items-center justify-center py-20">
           <Loader2 className="h-8 w-8 animate-spin text-fuji-400" />
+        </div>
+      ) : notFound ? (
+        <div className="flex flex-col items-center justify-center gap-4 py-20">
+          <XCircle className="h-12 w-12 text-ink-600" />
+          <p className="text-lg font-medium text-ink-300">Job not found</p>
+          <p className="text-sm text-ink-500">
+            This job may have expired or does not exist.
+          </p>
+          <button
+            onClick={() => router.push("/dashboard")}
+            className="mt-2 rounded-xl bg-fuji-600 px-6 py-2.5 text-sm font-medium text-white transition-all hover:brightness-110"
+          >
+            Back to Dashboard
+          </button>
         </div>
       ) : (
         <>
