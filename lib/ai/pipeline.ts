@@ -297,10 +297,45 @@ async function writeArticles(state: PipelineStateType): Promise<Partial<Pipeline
           return existingMap.get(articlePath)!;
         }
 
-        // Gather relevant source context snippets
-        const contextSnippets = Object.entries(configFiles)
-          .slice(0, 8)
-          .map(([path, content]) => `### File: ${path}\n\`\`\`\n${content.slice(0, 1500)}\n\`\`\``)
+        // Gather targeted source context snippets matching this specific catalog's domain or dependent files
+        const entries = Object.entries(configFiles);
+        const chosen = new Set<string>();
+
+        // 1. Match explicitly requested dependent files
+        const depPaths = (catalog.dependent_files || "").split(",").map((s) => s.trim()).filter(Boolean);
+        for (const dep of depPaths) {
+          for (const [path] of entries) {
+            if (path === dep || path.endsWith(dep) || path.includes(dep)) {
+              chosen.add(path);
+            }
+          }
+        }
+
+        // 2. Match catalog name keywords against file paths
+        const keywords = catalog.name
+          .toLowerCase()
+          .replace(/[^a-z0-9]/g, " ")
+          .split(" ")
+          .filter((w) => w.length > 3);
+
+        for (const [path] of entries) {
+          const lowerPath = path.toLowerCase();
+          if (keywords.some((kw) => lowerPath.includes(kw))) {
+            chosen.add(path);
+          }
+        }
+
+        // 3. Fallback to essential configs if fewer than 4 files chosen
+        if (chosen.size < 4) {
+          for (const [path] of entries) {
+            if (chosen.size >= 10) break;
+            chosen.add(path);
+          }
+        }
+
+        const selectedPaths = Array.from(chosen).slice(0, 10);
+        const contextSnippets = selectedPaths
+          .map((path) => `### File: ${path}\n\`\`\`\n${(configFiles[path] || "").slice(0, 3500)}\n\`\`\``)
           .join("\n\n");
 
         const articlePrompt = `You are a principal technical author writing an exhaustive documentation sub-article titled "${catalog.name}".
@@ -308,22 +343,21 @@ async function writeArticles(state: PipelineStateType): Promise<Partial<Pipeline
 ## Topic Instructions:
 ${catalog.prompt}
 
-## Source Context & Config Samples:
+## Target Source Code & Config Samples:
 ${contextSnippets}
 
 ## Mandatory Content & Formatting Requirements:
-1. Start with a <cite> block listing referenced code files:
+1. Start with an explicit <cite> block listing referenced code files using file:// scheme links:
 <cite>
 **Referenced Files in This Document**
 - [file_name](file://path/to/file)
 </cite>
 
-2. Table of Contents with anchor links.
-3. Include at least TWO Mermaid diagrams (sequence diagrams \`mermaid sequenceDiagram\`, entity diagrams \`mermaid classDiagram\` or \`mermaid graph TB\`).
-4. Include concrete code contracts, type interfaces, API request/response payloads, and configuration options.
-5. Detail architectural design patterns, edge case handling, error types, and scaling considerations.
-6. Include step-by-step processing pipelines and command-line execution examples.
-7. End each major section with **Section sources** listing file paths.
+2. Table of Contents with numbered anchor links.
+3. Include at least TWO rich Mermaid diagrams (sequence diagrams \`mermaid sequenceDiagram\`, component architecture \`mermaid graph TB\`, or data flow \`mermaid graph LR\`). Always annotate diagrams with **Diagram sources** listing file paths.
+4. Include concrete code contracts, TypeScript interfaces, API request/response JSON payloads, and environment variables.
+5. Detail architectural design patterns, multi-tenant isolation, caching/queue behavior, error handling, and scaling considerations.
+6. End each major section with **Section sources** listing file paths.
 
 Write an exhaustive, high-quality, 1000+ word technical Markdown document. Return ONLY the Markdown content.`;
 
@@ -435,6 +469,36 @@ async function buildMetadata(state: PipelineStateType): Promise<Partial<Pipeline
     wiki_repo: { id: state.jobId, name: state.repo, progress_status: "completed", wiki_present_status: "COMPLETED" },
   };
 
+  // Build dynamic agent guidance table from actual generated articles
+  const domainCategories = [
+    { label: "🏗️ **System Architecture**", folder: "Architecture Overview" },
+    { label: "🗄️ **Database Schema & Models**", folder: "Database Schema" },
+    { label: "🔌 **Backend API Services**", folder: "Backend API" },
+    { label: "⚡ **Background Job Workers**", folder: "Background Workers" },
+    { label: "🎨 **Frontend Applications**", folder: "Frontend Applications" },
+    { label: "🛡️ **Security & Authentication**", folder: "Security & Compliance" },
+    { label: "📦 **Shared Packages**", folder: "Shared Packages" },
+    { label: "🔌 **Integrations Guide**", folder: "Integrations Guide" },
+  ];
+
+  const dynamicAgentLinks: string[] = [];
+  for (const cat of domainCategories) {
+    const matching = generatedArticles.find((a) => a.path.includes(`en/content/${cat.folder}/`));
+    if (matching) {
+      const targetPath = matching.path.startsWith("en/") ? `repowiki/${matching.path}` : matching.path;
+      dynamicAgentLinks.push(`- ${cat.label}: [${matching.path.replace(/^en\/content\//, "").replace(/\.md$/, "")}](file://${targetPath})`);
+    }
+  }
+
+  // Fallback if domain folders were flat
+  if (dynamicAgentLinks.length === 0) {
+    for (const art of generatedArticles.slice(0, 8)) {
+      const title = art.path.replace(/^en\/content\//, "").replace(/\.md$/, "");
+      const targetPath = art.path.startsWith("en/") ? `repowiki/${art.path}` : art.path;
+      dynamicAgentLinks.push(`- 📄 **${title}**: [${title}](file://${targetPath})`);
+    }
+  }
+
   const agentInstructionsContent = `# AI Agent Guidance & Architectural Map (` + state.repo + `)
 
 This repository includes a pre-indexed, multi-tier knowledge base and architectural documentation suite generated under \`repowiki/\` (or \`.saaya/repowiki/\`).
@@ -442,12 +506,7 @@ This repository includes a pre-indexed, multi-tier knowledge base and architectu
 ## Essential Context References for AI Agents (Claude Code, Antigravity, Cursor, Aider, Devin)
 Whenever working on features, bug fixes, or refactoring in this repository, inspect these primary documentation maps first:
 
-- 🏗️ **System Architecture**: \`repowiki/en/content/Architecture Overview/System Architecture.md\`
-- 🗄️ **Database Schema & Models**: \`repowiki/en/content/Database Schema/Database Schema.md\`
-- 🔌 **Backend API Services**: \`repowiki/en/content/Backend API/Backend API.md\`
-- ⚡ **Background Job Workers**: \`repowiki/en/content/Background Workers/Worker Architecture.md\`
-- 🎨 **Frontend Applications**: \`repowiki/en/content/Frontend Applications/Frontend Applications.md\`
-- 🛡️ **Security & Authentication**: \`repowiki/en/content/Security & Compliance/Authentication & Authorization.md\`
+` + dynamicAgentLinks.join("\n") + `
 
 ## Coding Conventions & Build Commands
 Refer to specific technology knowledge suites under \`repowiki/knowledge/en/\`:

@@ -85,7 +85,7 @@ export async function scanRepository(
 
   await Promise.allSettled(filePromises);
 
-  // 2. Scan for workspace packages and sub-package.json files
+  // 2. Scan for workspace packages and strategic source code files across apps and packages
   const subFilesToSample = fileTree
     .filter((f) => f.type === "file")
     .map((f) => f.path)
@@ -97,9 +97,14 @@ export async function scanRepository(
         p.includes("controller") ||
         p.includes("service") ||
         p.includes("worker") ||
-        p.endsWith(".prisma")
+        p.includes("processor") ||
+        p.includes("adapter") ||
+        p.includes("guard") ||
+        p.includes("module") ||
+        p.endsWith(".prisma") ||
+        p.endsWith(".sql")
     )
-    .slice(0, 30); // Up to 30 strategic source code samples
+    .slice(0, 50); // Up to 50 strategic source code samples
 
   const samplePromises = subFilesToSample.map(async (filePath) => {
     if (configFiles[filePath]) return;
@@ -112,8 +117,8 @@ export async function scanRepository(
       });
       if ("content" in data && data.content) {
         const raw = Buffer.from(data.content, "base64").toString("utf-8");
-        // Truncate to first 2500 chars to conserve context space
-        configFiles[filePath] = raw.length > 2500 ? raw.slice(0, 2500) + "\n...[truncated]" : raw;
+        // Truncate to first 4000 chars to provide rich context without overflowing limits
+        configFiles[filePath] = raw.length > 4000 ? raw.slice(0, 4000) + "\n...[truncated]" : raw;
       }
     } catch {
       // skip

@@ -1,64 +1,46 @@
-# 🌸 Code Saaya (Saaya Repowiki Generator)
+<p align="center">
+  <img src="public/banner.png" alt="Code Saaya" width="100%">
+</p>
 
-**Code Saaya** is an AI-powered automated repository documentation and wiki generator. It scans your GitHub codebase, analyzes project taxonomy, generates structured multi-file knowledge cards for each module, synthesizes comprehensive Markdown articles with diagrams, and automatically submits a Pull Request containing `.saaya/repowiki/` directly to your repository.
-
----
-
-## ✨ Features
-
-- 🚀 **5-Step Automated AI Pipeline**:
-  1. **Repository Scanning**: Analyzes codebase structures, file trees, and project metadata using Octokit.
-  2. **Taxonomy & Indexing**: Generates `_index.yaml` and maps module dependency graphs.
-  3. **Module Card Generation**: Produces 6-file structured knowledge cards per software module.
-  4. **Article Synthesis**: Synthesizes rich, cross-linked Markdown documentation with visual diagrams.
-  5. **Automated PR Creation**: Automatically creates and opens a GitHub Pull Request with the generated wiki.
-- 🔐 **Clerk Authentication**: Secure user management and seamless OAuth authentication.
-- 🗄️ **Appwrite Persistence**: Real-time job status tracking, user provider configuration, and artifact history.
-- 🤖 **Flexible LLM Provider Support**:
-  - **OpenRouter OAuth & API Key**: Direct integration with top models (Claude 3.5, GPT-4o, DeepSeek R1, Llama 3.3).
-  - **Custom OpenAI-Compatible Endpoints**: Connect to local models (Ollama, vLLM, LMStudio) or cloud endpoints (Together.ai, Groq).
-  - **Granular Rate Control**: Customizable Max RPM, Max TPM, and parallel agent concurrency limits.
-- 🎨 **Modern Japanese-Inspired Aesthetic UI**: Built with Next.js 16 App Router, React 19, Tailwind CSS v4, Framer Motion, and GSAP.
-
----
-
-## 🛠️ Technology Stack
-
-| Layer | Technology |
-| :--- | :--- |
-| **Framework** | [Next.js 16 (App Router)](https://nextjs.org/) & React 19 |
-| **Language** | TypeScript |
-| **Styling & UI** | Tailwind CSS v4, Framer Motion, GSAP, Lucide Icons |
-| **Authentication** | [Clerk](https://clerk.com/) (`@clerk/nextjs`) |
-| **Database & Backend** | [Appwrite](https://appwrite.io/) (`node-appwrite`) |
-| **AI Orchestration** | LangChain (`@langchain/core`, `@langchain/langgraph`, `@langchain/openai`), OpenAI SDK |
-| **GitHub Integration** | `@octokit/rest` |
-| **Deployment** | [Vercel](https://vercel.com/) |
-
----
-
-## 🏗️ Architecture & Pipeline Overview
-
-```mermaid
-flowchart TD
-    A[User Inputs Repo URL] --> B[Clerk Auth Verification]
-    B --> C[Create Job in Appwrite]
-    C --> D[Step 1: Scan GitHub Repo via Octokit]
-    D --> E[Step 2: Plan Taxonomy & _index.yaml]
-    E --> F[Step 3: Generate 6-File Module Cards via LLM]
-    F --> G[Step 4: Synthesize Markdown Articles & Diagrams]
-    G --> H[Step 5: Commit & Open GitHub PR]
-    H --> I[Job Status: COMPLETED with PR Link]
+```
+ ██████╗ ██████╗ ██████╗ ██╗███████╗   ██████╗  █████╗  █████╗ ██╗   ██╗██████╗ 
+██╔════╝██╔═══██╗██╔══██╗██║██╔════╝  ██╔════╝ ██╔══██╗██╔══██╗╚██╗ ██╔╝██╔══██╗
+██║     ██║   ██║██║  ██║██║███████╗  ███████╗ ███████║███████║ ╚████╔╝ ██████╔╝
+██║     ██║   ██║██║  ██║██║╚════██║  ╚════██║ ██╔══██║██╔══██║  ╚██╔╝  ██╔══██╗
+╚██████╗╚██████╔╝██████╔╝██║███████║  ███████║ ██║  ██║██║  ██║   ██║   ██║  ██║
+ ╚═════╝ ╚═════╝ ╚═════╝ ╚═╝╚══════╝  ╚══════╝ ╚═╝  ╚═╝╚═╝  ╚═╝   ╚═╝   ╚═╝  ╚═╝
 ```
 
+<p align="center">
+  <a href="https://github.com/anurag3407/code-saaya">Code Saaya Engine</a> | <a href="https://github.com/anurag3407/code-saaya">GitHub Repository</a>
+</p>
+<p align="center">
+  <a href="https://github.com/anurag3407/code-saaya"><img src="https://img.shields.io/badge/Docs-code--saaya-FFD700?style=for-the-badge" alt="Documentation"></a>
+  <a href="https://github.com/anurag3407/code-saaya/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-green?style=for-the-badge" alt="License: MIT"></a>
+  <a href="https://github.com/anurag3407"><img src="https://img.shields.io/badge/Built%20by-Anurag-blueviolet?style=for-the-badge" alt="Built by Anurag"></a>
+</p>
+
+**The autonomous AI repository knowledge & documentation engine built by [Anurag](https://github.com/anurag3407).** It turns any software repository into a pre-indexed, enterprise-grade knowledge base for human engineers and AI coding agents (**Claude Code**, **Antigravity**, **Cursor**, **Aider**, **Devin**). Powered by a stateful **LangGraph multi-agent pipeline**, it extracts deep database schemas, API contracts, async worker queues, and 6-file technology knowledge modules, auto-delivering `.saaya/repowiki/`, `CLAUDE.md`, and `AGENTS.md` directly via GitHub Pull Requests.
+
+Use any AI model you want — OpenRouter (Claude 3.5 Sonnet, GPT-4o, DeepSeek R1, Llama 3.3), OpenAI API, or custom local endpoints (Ollama, vLLM). Switch models with zero code changes or lock-in.
+
+<table>
+<tr><td><b>Multi-Pass LangGraph Pipeline</b></td><td>Stateful execution graph orchestrating specialized AI nodes: <code>planTaxonomy</code> → <code>generateCatalogs</code> → <code>generateModuleCards</code> → <code>writeArticles</code> → <code>buildMetadata</code>. Resilient checkpointing allows jobs to resume seamlessly.</td></tr>
+<tr><td><b>AI Agent Auto-Discovery</b></td><td>Automatically generates root <code>CLAUDE.md</code> and <code>AGENTS.md</code> guidelines. Coding agents (Claude Code, Antigravity, Cursor, Aider) auto-read repo architecture, database schemas, coding rules, and verification commands upon project load.</td></tr>
+<tr><td><b>Dual Knowledge Architecture</b></td><td>Human-readable Markdown sub-articles with Mermaid sequence & ER diagrams, payload definitions, and file citations (<code>file://...</code>) + machine-parseable 6-file technology knowledge suites (<code>_module.yaml</code>).</td></tr>
+<tr><td><b>Tech-Stack Auto-Discovery</b></td><td>Scans imports and dependencies to identify 15–25 technology components (PostgreSQL, Redis, Better Auth, BullMQ, Pusher, Voyage AI, Turborepo) and generates 6-file documentation suites for each.</td></tr>
+<tr><td><b>Automated GitHub PR Delivery</b></td><td>Octokit-powered cross-repo PR automation using base64 blob tree construction. Supports direct branch commits or fork-and-PR workflows for public and private repositories.</td></tr>
+<tr><td><b>Token-Bucket Rate Limiter</b></td><td>Adaptive concurrency controller (<code>RateLimitedTaskQueue</code>) that dynamically throttles requests to respect free-tier and premium LLM rate limits without HTTP 429 errors.</td></tr>
+<tr><td><b>Realtime Logs & Job Controls</b></td><td>Live SSE/Appwrite terminal execution stream, log search & level filters (Info, Success, Warn, Error), log text export, and inline Pause, Resume, and Delete job controls.</td></tr>
+</table>
+
 ---
 
-## 🚀 Getting Started
+## Quick Setup & Local Installation
 
 ### Prerequisites
-
 - **Node.js**: `v20.9.0` or higher
-- **npm** / **pnpm** / **yarn**
+- **npm** or **pnpm**
 - **Clerk Account**: For authentication keys
 - **Appwrite Instance**: Cloud or self-hosted project
 
@@ -98,35 +80,88 @@ APPWRITE_DATABASE_ID=saaya_db
 # OpenRouter Integration
 OPENROUTER_AUTH_URL=https://openrouter.ai/auth
 OPENROUTER_API_URL=https://openrouter.ai/api/v1
-OPENROUTER_API_KEY=sk-or-v1-... # Optional default fallback
+OPENROUTER_API_KEY=sk-or-v1-...
 
 # GitHub Access Token (for PR creation)
 GITHUB_TOKEN=ghp_...
 ```
 
-### 4. Run Development Server
+### 4. Setup Database & Start Server
+
+Initialize Appwrite database collections and start the Next.js development server:
 
 ```bash
+npx tsx scripts/setup-appwrite.ts
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) in your browser to start using Code Saaya.
+Open [http://localhost:3000](http://localhost:3000) in your browser to access the dashboard.
 
 ---
 
-## ⚡ Deployment on Vercel
+## Quick Reference
 
-The easiest way to deploy Code Saaya is via [Vercel](https://vercel.com):
-
-1. Push your repository to GitHub.
-2. Import the project in Vercel.
-3. Configure your **Environment Variables** in Vercel Project Settings:
-   - `NEXT_PUBLIC_APP_URL=https://your-domain.vercel.app`
-   - Add your Clerk, Appwrite, and OpenRouter API credentials.
-4. Click **Deploy**.
+| Action | Command / Location |
+| --- | --- |
+| Start Dev Server | `npm run dev` |
+| Initialize Appwrite DB | `npx tsx scripts/setup-appwrite.ts` |
+| Check TypeScript Types | `npx tsc --noEmit` |
+| Build Production Bundle | `npm run build` |
+| Run ESLint | `npm run lint` |
+| New Generation Wizard | Navigate to `/dashboard/new` |
+| AI Provider Settings | Navigate to `/settings` |
 
 ---
 
-## 📜 License
+## Key Features Breakdown
 
-This project is open-source under the [MIT License](LICENSE).
+### 1. Multi-Agent Pipeline Graph
+Saaya's LangGraph engine breaks down documentation into distinct execution nodes:
+- `planTaxonomy`: Scans file trees & schemas to partition codebase into nested domain folders.
+- `generateCatalogs`: Plans 50–100+ nested sub-articles across architecture, database, APIs, workers, and frontend.
+- `generateModuleCards`: Auto-discovers tech stack components and writes 6-file module suites (`overview.md`, `architecture_design.md`, `tech_stack.md`, `coding_conventions.md`, `unique_setup_and_commands.md`, `_module.yaml`).
+- `writeArticles`: Writes deep Markdown articles with sequence diagrams, code contracts, and file citations (`file://...`).
+- `buildMetadata`: Connects `knowledge_relations` and links `CLAUDE.md` & `AGENTS.md` guidelines.
+
+### 2. Form Lock Validation
+The generation wizard enforces strict step-by-step validation: Step 2 ("AI Engine") and model selection remain locked until a valid GitHub repository URL (`https://github.com/owner/repo`) is entered.
+
+### 3. Job Controls & Detailed Terminal Logs
+- **Pause / Resume**: Pause long-running generation jobs and resume execution from saved checkpoints.
+- **Delete / Cancel**: Cancel running jobs or remove job history documents.
+- **Terminal Filters**: Filter live logs by level (Info, Success, Warn, Error) or search keywords, and export logs to `.txt`.
+
+---
+
+## Architecture & Technology Stack
+
+| Layer | Technology |
+| --- | --- |
+| **Framework** | [Next.js 16 (App Router)](https://nextjs.org/) & React 19 |
+| **Language** | TypeScript |
+| **Styling & Motion** | Tailwind CSS v4, Framer Motion, GSAP, Lucide Icons |
+| **Authentication** | [Clerk](https://clerk.com/) (`@clerk/nextjs`) |
+| **Database & Realtime** | [Appwrite](https://appwrite.io/) (`node-appwrite`) |
+| **AI Orchestration** | LangGraph (`@langchain/langgraph`), OpenAI SDK |
+| **GitHub Automation** | `@octokit/rest` (Base64 Blob Git Trees) |
+
+---
+
+## Contributing
+
+We welcome contributions! Please feel free to open issues or submit pull requests on [GitHub](https://github.com/anurag3407/code-saaya).
+
+```bash
+git clone https://github.com/anurag3407/code-saaya.git
+cd code-saaya
+npm install
+npx tsc --noEmit
+```
+
+---
+
+## License
+
+MIT — see [LICENSE](LICENSE).
+
+Built with passion by [Anurag](https://github.com/anurag3407).

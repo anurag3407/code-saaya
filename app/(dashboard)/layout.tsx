@@ -34,8 +34,8 @@ export default function DashboardLayout({
           <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-br from-fuji-500 to-sakura-500">
             <Sparkles className="h-5 w-5 text-white" />
           </div>
-          <span className="text-lg font-semibold tracking-tight text-ink-50">
-            紗夜
+          <span className="text-lg font-bold tracking-tight text-gradient-fuji">
+            Saaya
           </span>
         </div>
 
