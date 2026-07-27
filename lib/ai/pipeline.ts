@@ -435,16 +435,39 @@ async function buildMetadata(state: PipelineStateType): Promise<Partial<Pipeline
     wiki_repo: { id: state.jobId, name: state.repo, progress_status: "completed", wiki_present_status: "COMPLETED" },
   };
 
+  const agentInstructionsContent = `# AI Agent Guidance & Architectural Map (` + state.repo + `)
+
+This repository includes a pre-indexed, multi-tier knowledge base and architectural documentation suite generated under \`repowiki/\` (or \`.saaya/repowiki/\`).
+
+## Essential Context References for AI Agents (Claude Code, Antigravity, Cursor, Aider, Devin)
+Whenever working on features, bug fixes, or refactoring in this repository, inspect these primary documentation maps first:
+
+- 🏗️ **System Architecture**: \`repowiki/en/content/Architecture Overview/System Architecture.md\`
+- 🗄️ **Database Schema & Models**: \`repowiki/en/content/Database Schema/Database Schema.md\`
+- 🔌 **Backend API Services**: \`repowiki/en/content/Backend API/Backend API.md\`
+- ⚡ **Background Job Workers**: \`repowiki/en/content/Background Workers/Worker Architecture.md\`
+- 🎨 **Frontend Applications**: \`repowiki/en/content/Frontend Applications/Frontend Applications.md\`
+- 🛡️ **Security & Authentication**: \`repowiki/en/content/Security & Compliance/Authentication & Authorization.md\`
+
+## Coding Conventions & Build Commands
+Refer to specific technology knowledge suites under \`repowiki/knowledge/en/\`:
+1. \`coding_conventions.md\` — Code style, error handling, layering, and naming rules.
+2. \`unique_setup_and_commands.md\` — Exact build, run, and test execution commands.
+3. \`architecture_design.md\` — Structural boundaries, dependencies, and integration patterns.
+`;
+
   const metadataFiles: GeneratedFile[] = [
     { path: "en/meta/repowiki-metadata.json", content: JSON.stringify(metadata, null, 2) },
     { path: "knowledge/en/_index.yaml", content: indexYaml },
+    { path: "CLAUDE.md", content: agentInstructionsContent },
+    { path: "AGENTS.md", content: agentInstructionsContent },
   ];
 
   return {
     metadata,
     generatedCards: [...generatedCards, ...metadataFiles],
     progress: 95,
-    currentStep: "Metadata linked",
+    currentStep: "Metadata & AI agent guidelines linked",
   };
 }
 

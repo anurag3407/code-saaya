@@ -224,7 +224,7 @@ export async function createSaayaPullRequest({
       owner: workOwner,
       repo: workRepo,
       message:
-        "docs(saaya): generate comprehensive RepoWiki knowledge base [skip ci]",
+        "docs(saaya): generate RepoWiki knowledge base & AI Agent guidelines (CLAUDE.md / AGENTS.md) [skip ci]",
       tree: treeSha,
       parents: [latestCommitSha],
     });
@@ -254,26 +254,28 @@ export async function createSaayaPullRequest({
       const { data: prData } = await octokit.pulls.create({
         owner, // target original repo
         repo,
-        title: "🛡️ Add Auto-Generated Saaya RepoWiki Knowledge Base",
+        title: "🛡️ Add Auto-Generated RepoWiki Knowledge Base & AI Agent Guidelines (CLAUDE.md / AGENTS.md)",
         head: `${headPrefix}${branchName}`,
         base: defaultBranch,
-        body: `## 🛡️ Saaya RepoWiki Documentation
+        body: `## 🛡️ Saaya RepoWiki & AI Agent Context Suite
 
-This PR introduces a comprehensive, pre-indexed knowledge base and architectural documentation suite generated under \`.saaya/repowiki/\`.
+This PR introduces a comprehensive, pre-indexed knowledge base and architectural documentation suite generated under \`.saaya/repowiki/\`, along with automatic AI Coding Agent guidelines (\`CLAUDE.md\` and \`AGENTS.md\`).
 
-### Included Documentation:
+### Included Documentation & Guidelines:
+- 🤖 **AI Agent Guidelines (\`CLAUDE.md\` & \`AGENTS.md\`)**: Pre-configured pointers for Claude Code, Antigravity, Cursor, and Aider to auto-use repowiki.
 - 🏗️ **System Architecture & Tech Stack Matrix**
 - 🔌 **Backend & Frontend API Specifications**
 - ⚡ **Background Workers & Async Queue Pipelines**
 - 🗄️ **Database Schemas & Migrations**
-- 📦 **Shared Package Documentation**
 - 📖 **Getting Started & Contributing Guides**
 - 🧩 **Modular Code Knowledge Cards (\`knowledge/en/\`)**
 
 ### Structure:
 \`\`\`
 .saaya/repowiki/
-├── en/content/          # Human-readable articles with citations & Mermaid diagrams
+├── CLAUDE.md            # Auto-read guidelines for Claude Code & Antigravity
+├── AGENTS.md            # Universal guidelines for AI Coding Agents
+├── en/content/          # Nested human-readable articles with citations & Mermaid diagrams
 ├── en/meta/             # repowiki-metadata.json (knowledge graph)
 └── knowledge/en/        # 6-file module cards + standalone tech cards
 \`\`\`
@@ -293,7 +295,6 @@ This PR introduces a comprehensive, pre-indexed knowledge base and architectural
           ? (err as { status?: number }).status
           : undefined;
 
-      // Handle 403 Forbidden gracefully when token lacks PR creation scope on upstream repo
       if (octokitStatus === 403) {
         const compareUrl = `https://github.com/${owner}/${repo}/compare/${defaultBranch}...${headPrefix}${branchName}`;
         onLog?.(
