@@ -21,7 +21,7 @@ export async function POST(request: NextRequest) {
     const {
       repoUrl: inputRepoUrl,
       resumeJobId,
-      providerType = "OPENROUTER",
+      providerType: inputProviderType,
       model,
       baseUrl,
       apiKey,
@@ -29,8 +29,8 @@ export async function POST(request: NextRequest) {
     } = body as {
       repoUrl?: string;
       resumeJobId?: string;
-      providerType: ProviderType;
-      model: string;
+      providerType?: ProviderType;
+      model?: string;
       baseUrl?: string;
       apiKey?: string;
       maxRpm?: number;
@@ -39,9 +39,10 @@ export async function POST(request: NextRequest) {
     let repoUrl = inputRepoUrl || "";
     let jobId = resumeJobId || uuidv4();
     let existingCheckpoint: any = {};
+    let existingJob: any = null;
 
     if (resumeJobId) {
-      let existingJob = getInMemoryJob(resumeJobId);
+      existingJob = getInMemoryJob(resumeJobId);
       if (!existingJob) {
         try {
           const { databases } = createAdminClient();
@@ -52,6 +53,16 @@ export async function POST(request: NextRequest) {
         }
       }
       if (existingJob) {
+        // If job is already COMPLETED, do not re-run pipeline!
+        if (existingJob.status === "COMPLETED") {
+          return NextResponse.json({
+            jobId: resumeJobId,
+            status: "COMPLETED",
+            message: `Job ${resumeJobId} is already completed`,
+            pull_request_url: existingJob.pull_request_url,
+          });
+        }
+
         repoUrl = existingJob.repo_url;
         let cpRaw = existingJob.checkpoint || {};
         if (typeof cpRaw === "string") {
@@ -80,7 +91,65 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const targetModel = model?.trim() || "meta-llama/llama-3.3-70b-instruct:free";
+    // Load user's saved provider configurations from Appwrite
+    let savedCustomProvider: any = null;
+    let savedOpenRouterProvider: any = null;
+    try {
+      const { databases } = createAdminClient();
+      const providers = await databases.listDocuments(
+        DATABASE_ID,
+        COLLECTIONS.AI_PROVIDERS,
+        [Query.equal("user_id", userId)]
+      );
+      for (const p of providers.documents) {
+        if (p.provider_type === "CUSTOM" || p.provider_type === "CUSTOM_OPENAI") {
+          savedCustomProvider = p;
+        } else if (p.provider_type === "OPENROUTER") {
+          savedOpenRouterProvider = p;
+        }
+      }
+    } catch {
+      // ignore
+    }
+
+    // 1. Resolve Provider Type
+    const providerType: ProviderType =
+      inputProviderType ||
+      existingJob?.provider_type ||
+      (savedCustomProvider?.api_key || savedCustomProvider?.base_url ? "CUSTOM_OPENAI" : "OPENROUTER");
+
+    const isCustom = providerType === "CUSTOM_OPENAI";
+
+    // 2. Resolve Target Model
+    const targetModel =
+      model?.trim() ||
+      existingJob?.selected_model ||
+      (isCustom
+        ? savedCustomProvider?.selected_model
+        : savedOpenRouterProvider?.selected_model) ||
+      "meta-llama/llama-3.3-70b-instruct:free";
+
+    // 3. Resolve Base URL
+    const targetBaseUrl =
+      baseUrl ||
+      existingJob?.base_url ||
+      (isCustom ? savedCustomProvider?.base_url : undefined);
+
+    // 4. Resolve API Key
+    let resolvedApiKey =
+      apiKey?.trim() ||
+      existingJob?.api_key ||
+      (isCustom ? savedCustomProvider?.api_key : savedOpenRouterProvider?.api_key);
+
+    if (!resolvedApiKey) {
+      resolvedApiKey = process.env.OPENROUTER_API_KEY?.trim();
+    }
+
+    // 5. Resolve Max RPM
+    const targetMaxRpm =
+      maxRpm ||
+      existingJob?.max_rpm ||
+      (isCustom ? savedCustomProvider?.max_rpm : undefined);
 
     if (!repoUrl) {
       return NextResponse.json(
@@ -113,6 +182,8 @@ export async function POST(request: NextRequest) {
         current_step: "SCANNING",
         tokens_used: 0,
         created_at: new Date().toISOString(),
+        provider_type: providerType,
+        selected_model: targetModel,
       };
 
       setInMemoryJob(initialJob);
@@ -139,37 +210,11 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Resolve API key (try request body -> Appwrite stored settings -> env var)
-    let resolvedApiKey = apiKey?.trim();
-
-    if (!resolvedApiKey && providerType === "OPENROUTER") {
-      try {
-        const { databases } = createAdminClient();
-        const providers = await databases.listDocuments(
-          DATABASE_ID,
-          COLLECTIONS.AI_PROVIDERS,
-          [
-            Query.equal("user_id", userId),
-            Query.equal("provider_type", "OPENROUTER"),
-          ]
-        );
-        if (providers.documents.length > 0 && providers.documents[0].api_key) {
-          resolvedApiKey = providers.documents[0].api_key.trim();
-        }
-      } catch {
-        // Ignore if Appwrite missing
-      }
-    }
-
-    if (!resolvedApiKey) {
-      resolvedApiKey = process.env.OPENROUTER_API_KEY?.trim();
-    }
-
     if (!resolvedApiKey || resolvedApiKey === "sk-or-placeholder") {
       return NextResponse.json(
         {
           error:
-            "OpenRouter API Key is missing. Please connect OpenRouter OAuth or enter your API key in Settings.",
+            "OpenRouter/AI Provider API Key is missing. Please enter your API key in Settings.",
         },
         { status: 400 }
       );
@@ -179,11 +224,11 @@ export async function POST(request: NextRequest) {
     const aiClient = createAIClient({
       providerType,
       apiKey: resolvedApiKey,
-      baseUrl,
+      baseUrl: targetBaseUrl,
       model: targetModel,
     });
 
-    const limits = getRateLimits(targetModel, maxRpm);
+    const limits = getRateLimits(targetModel, targetMaxRpm);
     const queue = new RateLimitedTaskQueue(
       limits.maxConcurrency,
       limits.maxRpm
