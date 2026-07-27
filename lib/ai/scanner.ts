@@ -12,10 +12,12 @@ const CONFIG_FILES = [
   "next.config.ts",
   "next.config.js",
   "next.config.mjs",
+  "drizzle.config.ts",
+  "prisma/schema.prisma",
 ];
 
 /**
- * Scans a GitHub repository and returns its file tree + key config files
+ * Scans a GitHub repository and returns its file tree + key config files & sampled source code files
  */
 export async function scanRepository(
   githubToken: string | undefined,
@@ -34,7 +36,6 @@ export async function scanRepository(
     const { data } = await octokit.repos.get({ owner, repo });
     repoData = data;
   } catch (err: any) {
-    // If authenticated call fails with 401, try unauthenticated fallback for public repo
     if (err?.status === 401 && cleanToken) {
       console.warn(`[scanRepository] Authenticated request returned 401. Retrying unauthenticated...`);
       octokit = new Octokit({ userAgent: "code-saaya/v1.0.0" });
@@ -62,9 +63,9 @@ export async function scanRepository(
       size: item.size,
     }));
 
-  // 2. Fetch key config files content
   const configFiles: Record<string, string> = {};
 
+  // 1. Fetch key config files
   const filePromises = CONFIG_FILES.map(async (filePath) => {
     try {
       const { data } = await octokit.repos.getContent({
@@ -75,9 +76,7 @@ export async function scanRepository(
       });
 
       if ("content" in data && data.content) {
-        configFiles[filePath] = Buffer.from(data.content, "base64").toString(
-          "utf-8"
-        );
+        configFiles[filePath] = Buffer.from(data.content, "base64").toString("utf-8");
       }
     } catch {
       // File doesn't exist — skip
@@ -86,40 +85,42 @@ export async function scanRepository(
 
   await Promise.allSettled(filePromises);
 
-  // 3. Also scan for monorepo workspace packages
-  const workspaceDirs = fileTree
+  // 2. Scan for workspace packages and sub-package.json files
+  const subFilesToSample = fileTree
+    .filter((f) => f.type === "file")
+    .map((f) => f.path)
     .filter(
-      (f) =>
-        f.type === "file" &&
-        (f.path.match(/^(apps|packages|libs)\/[^/]+\/package\.json$/) ||
-          f.path.match(/^apps\/[^/]+\/src\/$/))
+      (p) =>
+        p.endsWith("package.json") ||
+        p.includes("schema") ||
+        p.includes("routes") ||
+        p.includes("controller") ||
+        p.includes("service") ||
+        p.includes("worker") ||
+        p.endsWith(".prisma")
     )
-    .map((f) => f.path);
+    .slice(0, 30); // Up to 30 strategic source code samples
 
-  // Fetch sub-package.json files for monorepo awareness
-  const subPackagePromises = workspaceDirs
-    .filter((p) => p.endsWith("package.json"))
-    .slice(0, 20) // Limit to avoid rate limits
-    .map(async (filePath) => {
-      try {
-        const { data } = await octokit.repos.getContent({
-          owner,
-          repo,
-          path: filePath,
-          ref: defaultBranch,
-        });
-        if ("content" in data && data.content) {
-          configFiles[filePath] = Buffer.from(
-            data.content,
-            "base64"
-          ).toString("utf-8");
-        }
-      } catch {
-        // skip
+  const samplePromises = subFilesToSample.map(async (filePath) => {
+    if (configFiles[filePath]) return;
+    try {
+      const { data } = await octokit.repos.getContent({
+        owner,
+        repo,
+        path: filePath,
+        ref: defaultBranch,
+      });
+      if ("content" in data && data.content) {
+        const raw = Buffer.from(data.content, "base64").toString("utf-8");
+        // Truncate to first 2500 chars to conserve context space
+        configFiles[filePath] = raw.length > 2500 ? raw.slice(0, 2500) + "\n...[truncated]" : raw;
       }
-    });
+    } catch {
+      // skip
+    }
+  });
 
-  await Promise.allSettled(subPackagePromises);
+  await Promise.allSettled(samplePromises);
 
   return { fileTree, configFiles };
 }

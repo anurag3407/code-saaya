@@ -8,6 +8,7 @@ import type {
   GeneratedFile,
 } from "@/types/saaya";
 import { RateLimitedTaskQueue } from "./rate-limiter";
+import { discoverTechTopics, generateTechModuleSuite } from "./tech-extractor";
 
 // ─── Pipeline State Annotation ─────────────────────────────────────────────────
 
@@ -46,46 +47,45 @@ async function planTaxonomy(state: PipelineStateType): Promise<Partial<PipelineS
     return { taxonomy: state.taxonomy, progress: 25, currentStep: "Taxonomy planned" };
   }
 
-  onProgress?.("Planning taxonomy from repository structure...", 15);
+  onProgress?.("Planning multi-pass domain taxonomy from repository structure...", 15);
 
   const treeSummary = fileTree
-    .filter((f) => f.type === "dir")
-    .slice(0, 200)
     .map((f) => f.path)
+    .slice(0, 300)
     .join("\n");
 
   const configSummary = Object.entries(configFiles)
-    .map(([path, content]) => `### ${path}\n${content.slice(0, 2000)}`)
+    .slice(0, 10)
+    .map(([path, content]) => `### ${path}\n${content.slice(0, 1500)}`)
     .join("\n\n");
 
-  const prompt = `You are a repository architecture analyst. Given the directory structure and configuration files below, generate a module taxonomy in JSON format.
+  const prompt = `You are a principal repository architecture analyst. Given the file tree and config files below, generate a rich, multi-tiered module taxonomy for this project in JSON format.
 
-## Directory Structure:
+## File Tree Sample:
 ${treeSummary}
 
-## Configuration Files:
+## Key Configs & Source Samples:
 ${configSummary}
 
 ## Output Format:
-Return a JSON array of module objects. Each module:
+Return a JSON array of module objects. Group files logically into functional modules (e.g., Core API, Auth Module, Database/ORM, Background Queues, UI Components, Integrations, DevOps Pipeline, Analytics, etc.).
+
+Return JSON objects matching:
 {
-  "module_path": "api/auth",
-  "dir_name": "Authentication Module",
-  "title": "Authentication & Authorization",
-  "scope": ["src/auth/"],
+  "module_path": "backend/api",
+  "dir_name": "Backend API",
+  "title": "Backend API Service",
+  "scope": ["src/api/"],
   "source_files": [],
-  "children": [],
-  "depends_on": [],
-  "related_to": [{"path": "api/common"}]
+  "children": ["backend/api/auth", "backend/api/chat"],
+  "depends_on": ["core/db"],
+  "related_to": [{"path": "core/shared"}]
 }
 
 Rules:
-- Root module has module_path "" 
-- Group related directories into logical modules
-- Maximum 3 levels of nesting
-- Include scope globs that cover the module's files
-- Identify cross-module dependencies in related_to
-- Return ONLY valid JSON array, no markdown fences`;
+- Identify top-level domains AND sub-modules (up to 3 levels deep).
+- Provide clean module_path, title, scope globs, and relationships.
+- Return ONLY valid JSON array.`;
 
   const result = await queue.enqueue(async () => {
     const response = await aiClient.chat.completions.create({
@@ -113,7 +113,6 @@ Rules:
       related_to: Array.isArray(m?.related_to) ? m.related_to : [],
     }));
   } catch {
-    // Fallback: create a single root module
     taxonomy = [{
       module_path: "",
       dir_name: state.repo,
@@ -126,7 +125,7 @@ Rules:
     }];
   }
 
-  onProgress?.(`Identified ${taxonomy.length} modules`, 25);
+  onProgress?.(`Identified ${taxonomy.length} taxonomy modules`, 25);
   return { taxonomy, progress: 25, currentStep: "Taxonomy planned" };
 }
 
@@ -140,44 +139,49 @@ async function generateCatalogs(state: PipelineStateType): Promise<Partial<Pipel
     return { catalogs: state.catalogs, progress: 35, currentStep: "Catalog generated" };
   }
 
-  onProgress?.("Generating documentation catalog...", 30);
+  onProgress?.("Generating hierarchical documentation catalog (50+ nested sub-articles)...", 30);
 
   const moduleSummary = (taxonomy || [])
     .map((m) => `- ${m.module_path || "(root)"}: ${m.title || "Module"} [scope: ${(m.scope || []).join(", ")}]`)
     .join("\n");
 
-  const prompt = `You are a documentation architect. Given the module taxonomy below, generate a documentation catalog — a list of articles to write.
+  const prompt = `You are a principal documentation architect. Design an exhaustive, multi-tier documentation catalog for project "${state.repo}".
 
-## Modules:
+## Module Taxonomy:
 ${moduleSummary}
 
-## Config context:
+## Available Configs:
 ${Object.keys(configFiles).join(", ")}
 
-## Output Format:
-Return a JSON array of catalog entries:
+## Requirements:
+Generate a JSON array of 40 to 80 detailed documentation articles organized into functional domain folders:
+1. Core Guides: Getting Started, Deployment & DevOps, Contributing Guide, Testing Strategy, Troubleshooting & FAQ
+2. Architecture Overview: System Architecture, Technology Stack, Data Flow & Processing, Real-time Communication
+3. Database Schema: Core Entities, Migrations, Billing & Subscriptions, Analytics Data, Knowledge Base Schema
+4. Backend API: REST Endpoints, Authentication & Authorization, Webhooks API, Workspaces API, Integrations API, Chat REST API, WebSocket API
+5. Background Workers: Worker Architecture, Job Processing System, Content Processors (Crawler, Extraction), Message Processors, Channel Adapters (WhatsApp, Instagram)
+6. Frontend Applications: Dashboard Application (Architecture, Settings, Auth, Chat UI, Analytics), Chat Widget, Marketing Website
+7. Shared Packages: Database Package, Core Package, UI Package, AI Package, Configuration Package
+8. Security & Compliance: Authentication & Authorization, Rate Limiting, Encryption, Audit Logging
+
+Each entry must have:
 {
   "id": "uuid-string",
-  "name": "Getting Started",
-  "description": "getting-started",
-  "prompt": "Detailed prompt for writing this article...",
-  "dependent_files": "README.md,package.json",
+  "name": "Database Schema/Core Entities",
+  "description": "core-entities-schema",
+  "prompt": "Detailed instructions on what code schemas, tables, and relations to document in this sub-article...",
+  "dependent_files": "drizzle.config.ts,package.json",
   "progress_status": "pending"
 }
 
-Rules:
-- Always include: Getting Started, Architecture Overview, Technology Stack
-- One article per major module group
-- Include sub-articles for complex modules (e.g. "Chat & Messaging API" > "WebSocket Real-time")
-- The "prompt" field should be a detailed instruction for writing that article
-- Return ONLY valid JSON array`;
+Return ONLY valid JSON array.`;
 
   const result = await queue.enqueue(async () => {
     const response = await aiClient.chat.completions.create({
       model,
       messages: [{ role: "user", content: prompt }],
       temperature: 0.3,
-      max_tokens: 4096,
+      max_tokens: 8192,
     });
     return response?.choices?.[0]?.message?.content || "[]";
   });
@@ -189,31 +193,27 @@ Rules:
     const rawArray = Array.isArray(rawParsed) ? rawParsed : [rawParsed];
     catalogs = rawArray.map((c: any) => ({
       id: c?.id || uuidv4(),
-      name: c?.name || "Untitled Article",
-      description: c?.description || "",
-      prompt: c?.prompt || `Write documentation for ${c?.name || "this article"}`,
+      name: String(c?.name || "Getting Started"),
+      description: String(c?.description || ""),
+      prompt: String(c?.prompt || `Write comprehensive documentation for ${c?.name}`),
       dependent_files: typeof c?.dependent_files === "string" ? c.dependent_files : Array.isArray(c?.dependent_files) ? c.dependent_files.join(",") : "README.md,package.json",
       progress_status: "pending",
     }));
   } catch {
-    catalogs = [{
-      id: uuidv4(),
-      name: "Getting Started",
-      description: "getting-started",
-      prompt: "Write a comprehensive getting started guide",
-      dependent_files: "README.md,package.json",
-      progress_status: "pending",
-    }];
+    catalogs = [
+      { id: uuidv4(), name: "Getting Started", description: "getting-started", prompt: "Write getting started guide", dependent_files: "README.md", progress_status: "pending" },
+      { id: uuidv4(), name: "Architecture Overview/System Architecture", description: "system-architecture", prompt: "Write system architecture guide", dependent_files: "README.md", progress_status: "pending" },
+    ];
   }
 
-  onProgress?.(`Planned ${catalogs.length} articles`, 35);
+  onProgress?.(`Planned ${catalogs.length} articles across nested domain folders`, 35);
   return { catalogs, progress: 35, currentStep: "Catalog generated" };
 }
 
-// ─── Node: Module Card Generator ───────────────────────────────────────────────
+// ─── Node: Tech Module & Knowledge Card Generator ──────────────────────────────
 
 async function generateModuleCards(state: PipelineStateType): Promise<Partial<PipelineStateType>> {
-  const { aiClient, model, taxonomy, fileTree, queue, onProgress, onCheckpoint } = state;
+  const { aiClient, model, fileTree, configFiles, queue, onProgress, onCheckpoint } = state;
 
   const existingMap = new Map<string, GeneratedFile>();
   if (state.generatedCards) {
@@ -223,89 +223,24 @@ async function generateModuleCards(state: PipelineStateType): Promise<Partial<Pi
   }
 
   const generatedCards: GeneratedFile[] = Array.from(existingMap.values());
-  const modules = taxonomy.slice(0, 30); // Limit to avoid excessive API calls
 
-  onProgress?.(
-    `Generating 6-file module knowledge cards (${existingMap.size > 0 ? `${existingMap.size} files cached from checkpoint` : "starting"})...`,
-    40
-  );
+  onProgress?.("Discovering tech-stack components & generating knowledge module suites...", 40);
 
-  // Process in parallel batches — the queue handles actual concurrency
+  // 1. Auto-discover technology topics (Postgres, Redis, Auth, Monorepo, AI, Queues, etc.)
+  const techTopics = await discoverTechTopics(aiClient, model, configFiles, fileTree, queue);
+  onProgress?.(`Discovered ${techTopics.length} technology stack topics`, 45);
+
+  // 2. Generate 6-file module suites for each discovered tech topic
   const batchSize = Math.max(queue.active <= 0 ? 4 : 2, 2);
-  for (let batchStart = 0; batchStart < modules.length; batchStart += batchSize) {
-    const batch = modules.slice(batchStart, batchStart + batchSize);
+  for (let batchStart = 0; batchStart < techTopics.length; batchStart += batchSize) {
+    const batch = techTopics.slice(batchStart, batchStart + batchSize);
 
     const batchResults = await Promise.all(
-      batch.map(async (mod, batchIdx) => {
+      batch.map(async (topic, batchIdx) => {
         const i = batchStart + batchIdx;
-        const dirPrefix = mod.dir_name.replace(/[/\\:*?"<>|]/g, "_");
-        const moduleDir = mod.module_path
-          ? `knowledge/en/${modules[0]?.dir_name || state.repo}/${dirPrefix}`
-          : `knowledge/en/${dirPrefix}`;
-
-        const overviewPath = `${moduleDir}/overview.md`;
-        if (existingMap.has(overviewPath)) {
-          const cachedCards = [
-            existingMap.get(`${moduleDir}/overview.md`),
-            existingMap.get(`${moduleDir}/architecture_design.md`),
-            existingMap.get(`${moduleDir}/tech_stack.md`),
-            existingMap.get(`${moduleDir}/coding_conventions.md`),
-            existingMap.get(`${moduleDir}/unique_setup_and_commands.md`),
-            existingMap.get(`${moduleDir}/_module.yaml`),
-          ].filter(Boolean) as GeneratedFile[];
-
-          if (cachedCards.length === 6) {
-            const pct = 40 + Math.round((i / modules.length) * 25);
-            onProgress?.(`[Cached] Card ${i + 1}/${modules.length}: ${mod.title}`, pct);
-            return cachedCards;
-          }
-        }
-
-        const scopeFiles = fileTree
-          .filter((f) => mod.scope.some((s) => f.path.startsWith(s.replace(/\/$/, ""))))
-          .slice(0, 50)
-          .map((f) => f.path);
-
-        const cardPrompt = `Generate documentation for the module "${mod.title}" (path: ${mod.module_path || "root"}).
-Scope files: ${scopeFiles.slice(0, 20).join(", ")}
-
-Generate ALL 6 files as a JSON object with keys: overview, architecture_design, tech_stack, coding_conventions, unique_setup_and_commands, module_yaml.
-
-- overview: 1-2 sentence summary
-- architecture_design: Structural patterns, layering, boundaries (2-3 paragraphs)
-- tech_stack: Frameworks and libraries used (bullet list)
-- coding_conventions: Style rules, naming, error handling (bullet list)
-- unique_setup_and_commands: Build/run/test commands (code blocks)
-- module_yaml: YAML string with schema_version: 1, module_path, title, scope, source_files: [], depends_on: [], related_to: []
-
-Return ONLY valid JSON.`;
-
-        const result = await queue.enqueue(async () => {
-          const response = await aiClient.chat.completions.create({
-            model,
-            messages: [{ role: "user", content: cardPrompt }],
-            temperature: 0.2,
-            max_tokens: 3000,
-          });
-          return response?.choices?.[0]?.message?.content || "{}";
-        });
-
-        try {
-          const cleaned = result.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
-          const cards = JSON.parse(cleaned);
-          const pct = 40 + Math.round((i / modules.length) * 25);
-          onProgress?.(`Card ${i + 1}/${modules.length}: ${mod.title}`, pct);
-          return [
-            { path: `${moduleDir}/overview.md`, content: cards.overview || "" },
-            { path: `${moduleDir}/architecture_design.md`, content: cards.architecture_design || "" },
-            { path: `${moduleDir}/tech_stack.md`, content: cards.tech_stack || "" },
-            { path: `${moduleDir}/coding_conventions.md`, content: cards.coding_conventions || "" },
-            { path: `${moduleDir}/unique_setup_and_commands.md`, content: cards.unique_setup_and_commands || "" },
-            { path: `${moduleDir}/_module.yaml`, content: cards.module_yaml || "" },
-          ] as GeneratedFile[];
-        } catch {
-          return [] as GeneratedFile[];
-        }
+        const pct = 45 + Math.round((i / techTopics.length) * 20);
+        onProgress?.(`Generating 6-file knowledge suite ${i + 1}/${techTopics.length}: ${topic.name}`, pct);
+        return generateTechModuleSuite(aiClient, model, topic, configFiles, state.repo, queue);
       })
     );
 
@@ -321,10 +256,10 @@ Return ONLY valid JSON.`;
     onCheckpoint?.({ generatedCards });
   }
 
-  return { generatedCards, progress: 65, currentStep: "Module cards generated" };
+  return { generatedCards, progress: 65, currentStep: "Knowledge modules generated" };
 }
 
-// ─── Node: Article Writer ──────────────────────────────────────────────────────
+// ─── Node: Deep Article Writer ──────────────────────────────────────────────────
 
 async function writeArticles(state: PipelineStateType): Promise<Partial<PipelineStateType>> {
   const { aiClient, model, catalogs, configFiles, queue, onProgress, onCheckpoint } = state;
@@ -339,14 +274,13 @@ async function writeArticles(state: PipelineStateType): Promise<Partial<Pipeline
   }
 
   const generatedArticles: GeneratedFile[] = Array.from(existingMap.values());
-  const articles = catalogs.slice(0, 20); // Limit
+  const articles = catalogs;
 
   onProgress?.(
-    `Writing documentation articles (${existingMap.size > 0 ? `${existingMap.size}/${articles.length} already written` : "starting"})...`,
+    `Writing technical documentation articles (${existingMap.size > 0 ? `${existingMap.size}/${articles.length} cached` : "starting"})...`,
     70
   );
 
-  // Process articles in parallel batches
   const batchSize = Math.max(queue.active <= 0 ? 4 : 2, 2);
   for (let batchStart = 0; batchStart < articles.length; batchStart += batchSize) {
     const batch = articles.slice(batchStart, batchStart + batchSize);
@@ -354,8 +288,8 @@ async function writeArticles(state: PipelineStateType): Promise<Partial<Pipeline
     const batchResults = await Promise.all(
       batch.map(async (catalog, batchIdx) => {
         const i = batchStart + batchIdx;
-        const safeName = catalog.name.replace(/[/\\:*?"<>|]/g, "_").trim();
-        const articlePath = `en/content/${safeName}.md`;
+        const rawName = catalog.name.trim();
+        const articlePath = rawName.endsWith(".md") ? `en/content/${rawName}` : `en/content/${rawName}.md`;
 
         if (existingMap.has(articlePath)) {
           const pct = 70 + Math.round((i / articles.length) * 20);
@@ -363,43 +297,46 @@ async function writeArticles(state: PipelineStateType): Promise<Partial<Pipeline
           return existingMap.get(articlePath)!;
         }
 
-        const articlePrompt = `Write a comprehensive documentation article titled "${catalog.name}".
+        // Gather relevant source context snippets
+        const contextSnippets = Object.entries(configFiles)
+          .slice(0, 8)
+          .map(([path, content]) => `### File: ${path}\n\`\`\`\n${content.slice(0, 1500)}\n\`\`\``)
+          .join("\n\n");
 
-Instructions: ${catalog.prompt}
+        const articlePrompt = `You are a principal technical author writing an exhaustive documentation sub-article titled "${catalog.name}".
 
-Context files available: ${catalog.dependent_files}
-Config content:
-${Object.entries(configFiles)
-  .filter(([path]) => catalog.dependent_files.includes(path))
-  .map(([path, content]) => `### ${path}\n${content.slice(0, 1500)}`)
-  .join("\n\n")}
+## Topic Instructions:
+${catalog.prompt}
 
-## FORMAT REQUIREMENTS:
-1. Start with a <cite> block listing referenced files:
+## Source Context & Config Samples:
+${contextSnippets}
+
+## Mandatory Content & Formatting Requirements:
+1. Start with a <cite> block listing referenced code files:
 <cite>
 **Referenced Files in This Document**
-- [file.ts](file://path/to/file.ts)
+- [file_name](file://path/to/file)
 </cite>
 
-2. Include a ## Table of Contents with numbered anchor links
-3. Use ## for major sections
-4. Include at least one mermaid diagram (graph TB or sequenceDiagram)
-5. End each section with **Section sources** listing file paths
-6. Be thorough, technical, and precise
+2. Table of Contents with anchor links.
+3. Include at least TWO Mermaid diagrams (sequence diagrams \`mermaid sequenceDiagram\`, entity diagrams \`mermaid classDiagram\` or \`mermaid graph TB\`).
+4. Include concrete code contracts, type interfaces, API request/response payloads, and configuration options.
+5. Detail architectural design patterns, edge case handling, error types, and scaling considerations.
+6. Include step-by-step processing pipelines and command-line execution examples.
+7. End each major section with **Section sources** listing file paths.
 
-Return the complete Markdown article.`;
+Write an exhaustive, high-quality, 1000+ word technical Markdown document. Return ONLY the Markdown content.`;
 
         const result = await queue.enqueue(async () => {
           const response = await aiClient.chat.completions.create({
             model,
             messages: [{ role: "user", content: articlePrompt }],
             temperature: 0.3,
-            max_tokens: 4096,
+            max_tokens: 8192,
           });
           const content = response?.choices?.[0]?.message?.content;
           if (!content) {
-            console.warn(`[ArticleWriter] Empty or malformed LLM response for article "${catalog.name}"`);
-            return `# ${catalog.name}\n\nDocumentation generation returned no content for this module.`;
+            return `# ${catalog.name}\n\nDocumentation content generation returned empty response.`;
           }
           return content;
         });
@@ -427,10 +364,10 @@ Return the complete Markdown article.`;
   return { generatedArticles, progress: 90, currentStep: "Articles written" };
 }
 
-// ─── Node: Metadata Linker ─────────────────────────────────────────────────────
+// ─── Node: Metadata & Knowledge Graph Linker ───────────────────────────────────
 
 async function buildMetadata(state: PipelineStateType): Promise<Partial<PipelineStateType>> {
-  const { catalogs, generatedArticles, taxonomy } = state;
+  const { catalogs, generatedArticles, taxonomy, generatedCards } = state;
 
   const wikiCatalogs = catalogs.map((c) => ({
     id: c.id,
@@ -446,7 +383,7 @@ async function buildMetadata(state: PipelineStateType): Promise<Partial<Pipeline
 
   const wikiItems = generatedArticles.map((a, i) => ({
     catalog_id: catalogs[i]?.id || uuidv4(),
-    title: a.path.split("/").pop()?.replace(".md", "") || "",
+    title: a.path.replace(/^en\/content\//, "").replace(/\.md$/, ""),
     description: "",
     extend: "{}",
     progress_status: "completed",
@@ -455,6 +392,17 @@ async function buildMetadata(state: PipelineStateType): Promise<Partial<Pipeline
     id: uuidv4(),
     gmt_create: new Date().toISOString(),
     gmt_modified: new Date().toISOString(),
+  }));
+
+  // Auto-generate knowledge_relations mapping catalog items to knowledge topics
+  const knowledgeRelations = generatedArticles.slice(0, 80).map((art, idx) => ({
+    id: idx + 1,
+    source_id: wikiItems[idx]?.id || uuidv4(),
+    target_id: wikiItems[(idx + 1) % wikiItems.length]?.id || uuidv4(),
+    source_type: "WIKI_ITEM",
+    target_type: "WIKI_ITEM",
+    relationship_type: "PARENT_CHILD",
+    extra: JSON.stringify({ path: art.path }),
   }));
 
   // Build _index.yaml content
@@ -479,10 +427,10 @@ async function buildMetadata(state: PipelineStateType): Promise<Partial<Pipeline
   ].join("\n");
 
   const metadata = {
-    knowledge_relations: [],
+    knowledge_relations: knowledgeRelations,
     wiki_catalogs: wikiCatalogs,
     wiki_items: wikiItems,
-    wiki_overview: { content: `# ${state.repo}\nAuto-generated knowledge base.`, id: uuidv4(), repo_id: state.jobId },
+    wiki_overview: { content: `# ${state.repo}\nAuto-generated enterprise knowledge base.`, id: uuidv4(), repo_id: state.jobId },
     wiki_readme: { content: state.configFiles["README.md"] || "", id: uuidv4(), repo_id: state.jobId },
     wiki_repo: { id: state.jobId, name: state.repo, progress_status: "completed", wiki_present_status: "COMPLETED" },
   };
@@ -494,7 +442,7 @@ async function buildMetadata(state: PipelineStateType): Promise<Partial<Pipeline
 
   return {
     metadata,
-    generatedCards: [...state.generatedCards, ...metadataFiles],
+    generatedCards: [...generatedCards, ...metadataFiles],
     progress: 95,
     currentStep: "Metadata linked",
   };
