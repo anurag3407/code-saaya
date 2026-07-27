@@ -21,10 +21,10 @@
 <p align="center">
   <a href="https://github.com/anurag3407/code-saaya"><img src="https://img.shields.io/badge/Docs-code--saaya-FFD700?style=for-the-badge" alt="Documentation"></a>
   <a href="https://github.com/anurag3407/code-saaya/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-green?style=for-the-badge" alt="License: MIT"></a>
-  <a href="https://github.com/anurag3407"><img src="https://img.shields.io/badge/Built%20by-Anurag-blueviolet?style=for-the-badge" alt="Built by Anurag"></a>
+  <a href="https://github.com/anurag3407/code-saaya"><img src="https://img.shields.io/badge/Built%20by-SaayaLabs-blueviolet?style=for-the-badge" alt="Built by SaayaLabs"></a>
 </p>
 
-**The autonomous AI repository knowledge & documentation engine built by [Anurag](https://github.com/anurag3407).** It turns any software repository into a pre-indexed, enterprise-grade knowledge base for human engineers and AI coding agents (**Claude Code**, **Antigravity**, **Cursor**, **Aider**, **Devin**). Powered by a stateful **LangGraph multi-agent pipeline**, it extracts deep database schemas, API contracts, async worker queues, and 6-file technology knowledge modules, auto-delivering `.saaya/repowiki/`, `CLAUDE.md`, and `AGENTS.md` directly via GitHub Pull Requests.
+**The autonomous AI repository knowledge & documentation engine built by SaayaLabs.** It turns any software repository into a pre-indexed, enterprise-grade knowledge base for human engineers and AI coding agents (**Claude Code**, **Antigravity**, **Cursor**, **Aider**, **Devin**). Powered by a stateful **LangGraph multi-agent pipeline**, it extracts deep database schemas, API contracts, async worker queues, and 6-file technology knowledge modules, auto-delivering `.saaya/repowiki/`, `CLAUDE.md`, and `AGENTS.md` directly via GitHub Pull Requests.
 
 Use any AI model you want — OpenRouter (Claude 3.5 Sonnet, GPT-4o, DeepSeek R1, Llama 3.3), OpenAI API, or custom local endpoints (Ollama, vLLM). Switch models with zero code changes or lock-in.
 
@@ -168,4 +168,4 @@ npx tsc --noEmit
 
 MIT — see [LICENSE](LICENSE).
 
-Built with passion by [Anurag](https://github.com/anurag3407).
+Built with passion by SaayaLabs.
