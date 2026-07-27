@@ -8,6 +8,7 @@ export type JobStatus =
   | "WRITING_ARTICLES"
   | "CREATING_PR"
   | "COMPLETED"
+  | "PAUSED"
   | "FAILED";
 
 export interface SaayaJob {
@@ -15,7 +16,7 @@ export interface SaayaJob {
   user_id: string;
   repo_url: string;
   repo_name: string;
-  branch_name: string;
+  branch_name?: string;
   status: JobStatus;
   progress_percentage: number;
   current_step: string;

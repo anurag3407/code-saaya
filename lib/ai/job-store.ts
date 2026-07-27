@@ -70,7 +70,7 @@ if (!globalForJobs.__saaya_jobs_map__) {
 }
 const jobsMap = globalForJobs.__saaya_jobs_map__!;
 
-const MAX_LOGS = 200; // Keep last 200 log entries per job
+const MAX_LOGS = 300; // Keep last 300 log entries per job
 
 export function setInMemoryJob(job: JobRecord): void {
   jobsMap.set(job.$id, { ...job, logs: job.logs || [] });
@@ -87,6 +87,14 @@ export function updateInMemoryJob(
   jobsMap.set(jobId, updated);
   saveJobsToDisk(jobsMap);
   return updated;
+}
+
+export function deleteInMemoryJob(jobId: string): boolean {
+  const deleted = jobsMap.delete(jobId);
+  if (deleted) {
+    saveJobsToDisk(jobsMap);
+  }
+  return deleted;
 }
 
 export function pushJobLog(
