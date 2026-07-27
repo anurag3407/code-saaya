@@ -7,7 +7,7 @@ import { scanRepository, parseGitHubUrl } from "@/lib/ai/scanner";
 import { buildPipelineGraph } from "@/lib/ai/pipeline";
 import { createSaayaPullRequest } from "@/lib/github/pr-automation";
 import { createAdminClient, DATABASE_ID, COLLECTIONS, Query } from "@/lib/appwrite/server";
-import { setInMemoryJob, updateInMemoryJob, pushJobLog } from "@/lib/ai/job-store";
+import { setInMemoryJob, updateInMemoryJob, pushJobLog, getInMemoryJob } from "@/lib/ai/job-store";
 import type { ProviderType, GeneratedFile } from "@/types/saaya";
 
 export async function POST(request: NextRequest) {
@@ -41,17 +41,42 @@ export async function POST(request: NextRequest) {
     let existingCheckpoint: any = {};
 
     if (resumeJobId) {
-      const existingJob = getInMemoryJob(resumeJobId);
+      let existingJob = getInMemoryJob(resumeJobId);
+      if (!existingJob) {
+        try {
+          const { databases } = createAdminClient();
+          const doc = await databases.getDocument(DATABASE_ID, COLLECTIONS.SAAYA_JOBS, resumeJobId);
+          existingJob = doc as unknown as any;
+        } catch {
+          // ignore
+        }
+      }
       if (existingJob) {
         repoUrl = existingJob.repo_url;
-        existingCheckpoint = existingJob.checkpoint || {};
+        let cpRaw = existingJob.checkpoint || {};
+        if (typeof cpRaw === "string") {
+          try {
+            cpRaw = JSON.parse(cpRaw);
+          } catch {
+            cpRaw = {};
+          }
+        }
+        existingCheckpoint = cpRaw;
         updateInMemoryJob(resumeJobId, {
+          ...existingJob,
+          checkpoint: existingCheckpoint,
           status: "PLANNING",
-          progress_percentage: 15,
+          progress_percentage: existingJob.progress_percentage || 15,
           current_step: "RESUMING",
           error_message: undefined,
         });
-        pushJobLog(resumeJobId, "info", `▶️ Resuming job ${resumeJobId} from checkpoint...`);
+        const cachedCardsCount = existingCheckpoint.generatedCards?.length || 0;
+        const cachedArticlesCount = existingCheckpoint.generatedArticles?.length || 0;
+        pushJobLog(
+          resumeJobId,
+          "info",
+          `▶️ Resuming job ${resumeJobId} (${cachedCardsCount} cards, ${cachedArticlesCount} articles cached in checkpoint)...`
+        );
       }
     }
 
@@ -98,10 +123,19 @@ export async function POST(request: NextRequest) {
           DATABASE_ID,
           COLLECTIONS.SAAYA_JOBS,
           jobId,
-          initialJob
+          {
+            user_id: userId,
+            repo_url: repoUrl,
+            repo_name: `${owner}/${repo}`,
+            status: "SCANNING",
+            progress_percentage: 10,
+            current_step: "SCANNING",
+            selected_model: targetModel,
+            provider_type: providerType,
+          }
         );
-      } catch {
-        // Ignore if Appwrite unconfigured
+      } catch (err) {
+        console.error("[Appwrite] Error creating job document:", err);
       }
     }
 
@@ -200,11 +234,41 @@ export async function POST(request: NextRequest) {
           currentStep: "PLANNING",
           onProgress: (step: string, progress: number) => {
             pushJobLog(jobId, "info", `[${progress}%] ${step}`);
+            const status =
+              progress >= 90
+                ? "CREATING_PR"
+                : progress > 65
+                ? "WRITING_ARTICLES"
+                : progress > 35
+                ? "GENERATING_CARDS"
+                : "PLANNING";
             updateInMemoryJob(jobId, {
-              status: progress >= 90 ? "CREATING_PR" : progress > 65 ? "WRITING_ARTICLES" : progress > 35 ? "GENERATING_CARDS" : "PLANNING",
+              status,
               progress_percentage: progress,
               current_step: step,
             });
+            try {
+              const { databases } = createAdminClient();
+              databases.updateDocument(DATABASE_ID, COLLECTIONS.SAAYA_JOBS, jobId, {
+                status,
+                progress_percentage: progress,
+                current_step: step,
+              }).catch(() => {});
+            } catch {}
+          },
+          onCheckpoint: (cp: Record<string, any>) => {
+            const currentJob = getInMemoryJob(jobId);
+            const mergedCheckpoint = {
+              ...(currentJob?.checkpoint || {}),
+              ...cp,
+            };
+            updateInMemoryJob(jobId, { checkpoint: mergedCheckpoint });
+            try {
+              const { databases } = createAdminClient();
+              databases.updateDocument(DATABASE_ID, COLLECTIONS.SAAYA_JOBS, jobId, {
+                checkpoint: JSON.stringify(mergedCheckpoint),
+              }).catch(() => {});
+            } catch {}
           },
         });
 
@@ -273,6 +337,20 @@ export async function POST(request: NextRequest) {
           status: "FAILED",
           error_message: String(err),
         });
+        try {
+          const { databases } = createAdminClient();
+          await databases.updateDocument(
+            DATABASE_ID,
+            COLLECTIONS.SAAYA_JOBS,
+            jobId,
+            {
+              status: "FAILED",
+              error_message: String(err),
+            }
+          );
+        } catch {
+          // ignore
+        }
         return { success: false, error: String(err) };
       }
     })();

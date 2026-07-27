@@ -31,6 +31,7 @@ const PipelineState = Annotation.Root({
   progress: Annotation<number>,
   currentStep: Annotation<string>,
   onProgress: Annotation<((step: string, progress: number) => void) | undefined>,
+  onCheckpoint: Annotation<((checkpoint: Record<string, any>) => void) | undefined>,
 });
 
 type PipelineStateType = typeof PipelineState.State;
@@ -93,7 +94,7 @@ Rules:
       temperature: 0.2,
       max_tokens: 4096,
     });
-    return response.choices[0]?.message?.content || "[]";
+    return response?.choices?.[0]?.message?.content || "[]";
   });
 
   let taxonomy: ModuleNode[] = [];
@@ -167,7 +168,7 @@ Rules:
       temperature: 0.3,
       max_tokens: 4096,
     });
-    return response.choices[0]?.message?.content || "[]";
+    return response?.choices?.[0]?.message?.content || "[]";
   });
 
   let catalogs: CatalogNode[] = [];
@@ -193,17 +194,22 @@ Rules:
 // ─── Node: Module Card Generator ───────────────────────────────────────────────
 
 async function generateModuleCards(state: PipelineStateType): Promise<Partial<PipelineStateType>> {
-  const { aiClient, model, taxonomy, fileTree, queue, onProgress } = state;
+  const { aiClient, model, taxonomy, fileTree, queue, onProgress, onCheckpoint } = state;
 
-  if (state.generatedCards && state.generatedCards.length > 0) {
-    onProgress?.(`Reusing ${state.generatedCards.length} module cards from checkpoint`, 65);
-    return { generatedCards: state.generatedCards, progress: 65, currentStep: "Module cards generated" };
+  const existingMap = new Map<string, GeneratedFile>();
+  if (state.generatedCards) {
+    for (const card of state.generatedCards) {
+      if (card?.path) existingMap.set(card.path, card);
+    }
   }
 
-  onProgress?.("Generating 6-file module knowledge cards...", 40);
-
-  const generatedCards: GeneratedFile[] = [];
+  const generatedCards: GeneratedFile[] = Array.from(existingMap.values());
   const modules = taxonomy.slice(0, 30); // Limit to avoid excessive API calls
+
+  onProgress?.(
+    `Generating 6-file module knowledge cards (${existingMap.size > 0 ? `${existingMap.size} files cached from checkpoint` : "starting"})...`,
+    40
+  );
 
   // Process in parallel batches — the queue handles actual concurrency
   const batchSize = Math.max(queue.active <= 0 ? 4 : 2, 2);
@@ -217,6 +223,24 @@ async function generateModuleCards(state: PipelineStateType): Promise<Partial<Pi
         const moduleDir = mod.module_path
           ? `knowledge/en/${modules[0]?.dir_name || state.repo}/${dirPrefix}`
           : `knowledge/en/${dirPrefix}`;
+
+        const overviewPath = `${moduleDir}/overview.md`;
+        if (existingMap.has(overviewPath)) {
+          const cachedCards = [
+            existingMap.get(`${moduleDir}/overview.md`),
+            existingMap.get(`${moduleDir}/architecture_design.md`),
+            existingMap.get(`${moduleDir}/tech_stack.md`),
+            existingMap.get(`${moduleDir}/coding_conventions.md`),
+            existingMap.get(`${moduleDir}/unique_setup_and_commands.md`),
+            existingMap.get(`${moduleDir}/_module.yaml`),
+          ].filter(Boolean) as GeneratedFile[];
+
+          if (cachedCards.length === 6) {
+            const pct = 40 + Math.round((i / modules.length) * 25);
+            onProgress?.(`[Cached] Card ${i + 1}/${modules.length}: ${mod.title}`, pct);
+            return cachedCards;
+          }
+        }
 
         const scopeFiles = fileTree
           .filter((f) => mod.scope.some((s) => f.path.startsWith(s.replace(/\/$/, ""))))
@@ -244,7 +268,7 @@ Return ONLY valid JSON.`;
             temperature: 0.2,
             max_tokens: 3000,
           });
-          return response.choices[0]?.message?.content || "{}";
+          return response?.choices?.[0]?.message?.content || "{}";
         });
 
         try {
@@ -267,8 +291,15 @@ Return ONLY valid JSON.`;
     );
 
     for (const files of batchResults) {
-      generatedCards.push(...files);
+      for (const f of files) {
+        if (!existingMap.has(f.path)) {
+          existingMap.set(f.path, f);
+          generatedCards.push(f);
+        }
+      }
     }
+
+    onCheckpoint?.({ generatedCards });
   }
 
   return { generatedCards, progress: 65, currentStep: "Module cards generated" };
@@ -277,17 +308,24 @@ Return ONLY valid JSON.`;
 // ─── Node: Article Writer ──────────────────────────────────────────────────────
 
 async function writeArticles(state: PipelineStateType): Promise<Partial<PipelineStateType>> {
-  const { aiClient, model, catalogs, configFiles, queue, onProgress } = state;
+  const { aiClient, model, catalogs, configFiles, queue, onProgress, onCheckpoint } = state;
 
-  if (state.generatedArticles && state.generatedArticles.length > 0) {
-    onProgress?.(`Reusing ${state.generatedArticles.length} written articles from checkpoint`, 90);
-    return { generatedArticles: state.generatedArticles, progress: 90, currentStep: "Articles written" };
+  const existingMap = new Map<string, GeneratedFile>();
+  if (state.generatedArticles) {
+    for (const art of state.generatedArticles) {
+      if (art?.path && art?.content) {
+        existingMap.set(art.path, art);
+      }
+    }
   }
 
-  onProgress?.("Writing documentation articles...", 70);
-
-  const generatedArticles: GeneratedFile[] = [];
+  const generatedArticles: GeneratedFile[] = Array.from(existingMap.values());
   const articles = catalogs.slice(0, 20); // Limit
+
+  onProgress?.(
+    `Writing documentation articles (${existingMap.size > 0 ? `${existingMap.size}/${articles.length} already written` : "starting"})...`,
+    70
+  );
 
   // Process articles in parallel batches
   const batchSize = Math.max(queue.active <= 0 ? 4 : 2, 2);
@@ -297,6 +335,14 @@ async function writeArticles(state: PipelineStateType): Promise<Partial<Pipeline
     const batchResults = await Promise.all(
       batch.map(async (catalog, batchIdx) => {
         const i = batchStart + batchIdx;
+        const safeName = catalog.name.replace(/[/\\:*?"<>|]/g, "_").trim();
+        const articlePath = `en/content/${safeName}.md`;
+
+        if (existingMap.has(articlePath)) {
+          const pct = 70 + Math.round((i / articles.length) * 20);
+          onProgress?.(`[Cached] Article ${i + 1}/${articles.length}: ${catalog.name}`, pct);
+          return existingMap.get(articlePath)!;
+        }
 
         const articlePrompt = `Write a comprehensive documentation article titled "${catalog.name}".
 
@@ -331,21 +377,32 @@ Return the complete Markdown article.`;
             temperature: 0.3,
             max_tokens: 4096,
           });
-          return response.choices[0]?.message?.content || "";
+          const content = response?.choices?.[0]?.message?.content;
+          if (!content) {
+            console.warn(`[ArticleWriter] Empty or malformed LLM response for article "${catalog.name}"`);
+            return `# ${catalog.name}\n\nDocumentation generation returned no content for this module.`;
+          }
+          return content;
         });
 
-        const safeName = catalog.name.replace(/[/\\:*?"<>|]/g, "_").trim();
         const pct = 70 + Math.round((i / articles.length) * 20);
         onProgress?.(`Article ${i + 1}/${articles.length}: ${catalog.name}`, pct);
 
         return {
-          path: `en/content/${safeName}.md`,
+          path: articlePath,
           content: result,
         } as GeneratedFile;
       })
     );
 
-    generatedArticles.push(...batchResults);
+    for (const art of batchResults) {
+      if (!existingMap.has(art.path)) {
+        existingMap.set(art.path, art);
+        generatedArticles.push(art);
+      }
+    }
+
+    onCheckpoint?.({ generatedArticles });
   }
 
   return { generatedArticles, progress: 90, currentStep: "Articles written" };
