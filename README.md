@@ -2,9 +2,9 @@
   <img src="katana.png" alt="Saaya Logo" width="180">
 </p>
 
-<p align="center">
+<!-- <p align="center">
   <img src="public/banner.png" alt="Code Saaya" width="100%">
-</p>
+</p> -->
 
 ```
   ██████╗  ██████╗ ██████╗ ███████╗      ███████╗ █████╗  █████╗ ██╗   ██╗█████╗ 
