@@ -19,7 +19,7 @@ export async function GET() {
         COLLECTIONS.SAAYA_JOBS,
         [
           Query.equal("user_id", userId),
-          Query.orderDesc("created_at"),
+          Query.orderDesc("$createdAt"),
           Query.limit(50),
         ]
       );
