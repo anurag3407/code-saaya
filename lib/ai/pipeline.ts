@@ -100,7 +100,18 @@ Rules:
   let taxonomy: ModuleNode[] = [];
   try {
     const cleaned = result.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
-    taxonomy = JSON.parse(cleaned);
+    const rawParsed = JSON.parse(cleaned);
+    const rawArray = Array.isArray(rawParsed) ? rawParsed : [rawParsed];
+    taxonomy = rawArray.map((m: any) => ({
+      module_path: typeof m?.module_path === "string" ? m.module_path : "",
+      dir_name: typeof m?.dir_name === "string" ? m.dir_name : m?.title || state.repo,
+      title: typeof m?.title === "string" ? m.title : m?.dir_name || state.repo,
+      scope: Array.isArray(m?.scope) ? m.scope : ["**"],
+      source_files: Array.isArray(m?.source_files) ? m.source_files : [],
+      children: Array.isArray(m?.children) ? m.children : [],
+      depends_on: Array.isArray(m?.depends_on) ? m.depends_on : [],
+      related_to: Array.isArray(m?.related_to) ? m.related_to : [],
+    }));
   } catch {
     // Fallback: create a single root module
     taxonomy = [{
@@ -131,8 +142,8 @@ async function generateCatalogs(state: PipelineStateType): Promise<Partial<Pipel
 
   onProgress?.("Generating documentation catalog...", 30);
 
-  const moduleSummary = taxonomy
-    .map((m) => `- ${m.module_path || "(root)"}: ${m.title} [scope: ${m.scope.join(", ")}]`)
+  const moduleSummary = (taxonomy || [])
+    .map((m) => `- ${m.module_path || "(root)"}: ${m.title || "Module"} [scope: ${(m.scope || []).join(", ")}]`)
     .join("\n");
 
   const prompt = `You are a documentation architect. Given the module taxonomy below, generate a documentation catalog — a list of articles to write.
@@ -174,8 +185,16 @@ Rules:
   let catalogs: CatalogNode[] = [];
   try {
     const cleaned = result.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
-    catalogs = JSON.parse(cleaned);
-    catalogs = catalogs.map((c) => ({ ...c, id: c.id || uuidv4() }));
+    const rawParsed = JSON.parse(cleaned);
+    const rawArray = Array.isArray(rawParsed) ? rawParsed : [rawParsed];
+    catalogs = rawArray.map((c: any) => ({
+      id: c?.id || uuidv4(),
+      name: c?.name || "Untitled Article",
+      description: c?.description || "",
+      prompt: c?.prompt || `Write documentation for ${c?.name || "this article"}`,
+      dependent_files: typeof c?.dependent_files === "string" ? c.dependent_files : Array.isArray(c?.dependent_files) ? c.dependent_files.join(",") : "README.md,package.json",
+      progress_status: "pending",
+    }));
   } catch {
     catalogs = [{
       id: uuidv4(),
@@ -447,15 +466,15 @@ async function buildMetadata(state: PipelineStateType): Promise<Partial<Pipeline
     `exported_at: "${new Date().toISOString()}"`,
     "modules:",
     ...taxonomy.map((m) => [
-      `    "${m.module_path}":`,
-      `        dir_name: ${m.dir_name}`,
-      `        title: ${m.title}`,
+      `    "${m.module_path || ""}":`,
+      `        dir_name: ${m.dir_name || "Module"}`,
+      `        title: ${m.title || "Module"}`,
       `        scope:`,
-      ...m.scope.map((s) => `            - ${s}`),
+      ...(m.scope || []).map((s) => `            - ${s}`),
       `        source_files: []`,
-      `        children: [${m.children.join(", ")}]`,
-      `        depends_on: [${m.depends_on.join(", ")}]`,
-      `        related_to: [${m.related_to.map((r) => `{path: ${r.path}}`).join(", ")}]`,
+      `        children: [${(m.children || []).join(", ")}]`,
+      `        depends_on: [${(m.depends_on || []).join(", ")}]`,
+      `        related_to: [${(m.related_to || []).map((r) => `{path: ${r?.path || ""}}`).join(", ")}]`,
     ]).flat(),
   ].join("\n");
 
