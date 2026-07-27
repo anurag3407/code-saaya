@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { Sparkles, GitBranch } from "lucide-react";
+import Image from "next/image";
+import { GitBranch } from "lucide-react";
 
 export function Footer() {
   return (
@@ -9,8 +10,8 @@ export function Footer() {
       <div className="mx-auto flex max-w-7xl flex-col items-center justify-between gap-8 md:flex-row">
         {/* Brand Stamp (English Only) */}
         <div className="flex items-center gap-3">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-fuji-600/20 border border-fuji-500/30 text-fuji-300">
-            <Sparkles className="h-4 w-4" />
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-fuji-600/20 border border-fuji-500/30 overflow-hidden p-1">
+            <Image src="/katana.png" alt="Katana Logo" width={24} height={24} className="h-full w-full object-contain" />
           </div>
           <div className="flex items-center gap-2">
             <span className="font-display text-base font-bold text-gradient-fuji">

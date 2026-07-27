@@ -2,7 +2,8 @@
 
 import { motion } from "framer-motion";
 import Link from "next/link";
-import { Sparkles, Terminal, ArrowRight } from "lucide-react";
+import Image from "next/image";
+import { Terminal, ArrowRight } from "lucide-react";
 
 export function Navbar() {
   return (
@@ -15,8 +16,8 @@ export function Navbar() {
       <div className="mx-auto flex max-w-7xl items-center justify-between">
         {/* ─── Brand Logo (English Only) ─── */}
         <Link href="/" className="group flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-fuji-600 via-fuji-500 to-sakura-500 shadow-glow transition-transform duration-300 group-hover:scale-105">
-            <Sparkles className="h-5 w-5 text-white" />
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-fuji-600/30 via-fuji-500/20 to-sakura-500/30 border border-fuji-500/40 shadow-glow transition-transform duration-300 group-hover:scale-105 overflow-hidden p-1">
+            <Image src="/katana.png" alt="Katana Logo" width={36} height={36} className="h-full w-full object-contain" />
           </div>
           <div className="flex flex-col">
             <div className="flex items-center gap-2">

@@ -1,13 +1,13 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { UserButton } from "@clerk/nextjs";
 import { motion } from "framer-motion";
 import {
   LayoutDashboard,
   Settings,
-  Sparkles,
   Plus,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -31,8 +31,8 @@ export default function DashboardLayout({
       <aside className="fixed left-0 top-0 z-40 flex h-screen w-64 flex-col border-r border-ink-800 bg-ink-900/80 backdrop-blur-xl">
         {/* Logo */}
         <div className="flex items-center gap-3 px-6 py-6">
-          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-br from-fuji-500 to-sakura-500">
-            <Sparkles className="h-5 w-5 text-white" />
+          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-br from-fuji-500/30 to-sakura-500/30 border border-fuji-500/40 overflow-hidden p-1">
+            <Image src="/katana.png" alt="Katana Logo" width={32} height={32} className="h-full w-full object-contain" />
           </div>
           <span className="text-lg font-bold tracking-tight text-gradient-fuji">
             Saaya
